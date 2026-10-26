@@ -227,25 +227,13 @@ std::vector<float> play(const std::vector<Timed>& events, uint64_t frames, int b
 std::string blocks_name(int b) { return b > 0 ? std::to_string(b) : std::string("random 1..1024"); }
 
 // a plugin's stereo output against a mono reference x 0.25, flushed: frames that differ
-// against awva_render (tiny > 0): the component runs with subnormals flushed (nsc/no_denormals.h)
-// and awva_render doesn't, so a frame may differ where both are below tiny, in a decaying tail
-// (counted in *tails, the largest of them in *tail_max); every other frame bit for bit
-size_t differ(const std::vector<float>& out, const std::vector<float>& ref, size_t* first, double* peak, float tiny = 0.0f,
-    size_t* tails = nullptr, double* tail_max = nullptr) {
+size_t differ(const std::vector<float>& out, const std::vector<float>& ref, size_t* first, double* peak) {
 	size_t bad = 0;
 	*peak = 0;
-	if (tails) *tails = 0;
-	if (tail_max) *tail_max = 0;
 	for (size_t i = 0; i < ref.size() && 2 * i + 1 < out.size(); i++) {
 		const float want = flush(ref[i] * 0.25f);
 		*peak = std::fmax(*peak, std::fabs(want));
 		if (std::memcmp(&out[2 * i], &want, 4) != 0 || std::memcmp(&out[2 * i + 1], &want, 4) != 0) {
-			const double m = std::fmax(std::fabs(want), std::fmax(std::fabs(out[2 * i]), std::fabs(out[2 * i + 1])));
-			if (m < tiny && tails) {
-				(*tails)++;
-				if (tail_max) *tail_max = std::fmax(*tail_max, m);
-				continue;
-			}
 			if (!bad) *first = i;
 			bad++;
 		}
@@ -297,12 +285,12 @@ int perf_test(const char* ref_path) {
 		s.vc.assign(static_cast<size_t>(nv), awva::voice_at_rest);
 		const awva_voice_source src = {&s, PerfSource::block};
 		const std::vector<float> out = play({}, ref.size(), block, 48000, false, &src);
-		size_t first = 0, tails = 0;
-		double peak = 0, tail_max = 0;
-		const size_t bad = differ(out, ref, &first, &peak, 1e-30f, &tails, &tail_max);
+		size_t first = 0;
+		double peak = 0;
+		const size_t bad = differ(out, ref, &first, &peak);
 		char what[320];
-		std::snprintf(what, sizeof what, "default performance, %d voices, host blocks %s: %zu frames (peak %.3f) bit for bit awva_render's x 0.25 (%zu tail frames under 1e-30 differ, at most %.1e)",
-		    nv, blocks_name(block).c_str(), ref.size(), peak, tails, tail_max);
+		std::snprintf(what, sizeof what, "default performance, %d voices, host blocks %s: %zu frames (peak %.3f) bit for bit awva_render --ftz's x 0.25",
+		    nv, blocks_name(block).c_str(), ref.size(), peak);
 		check(!ref.empty() && bad == 0 && peak > 0.001, what);
 		if (bad) std::printf("     %zu frames differ, the first at %zu\n", bad, first);
 	}
@@ -332,12 +320,12 @@ int midifile_test(const char* mid, const char* ref_path, int rate) {
 	}
 	for (const int block : {256, 1, 33, 0}) {
 		const std::vector<float> out = play(events, ref.size(), block, rate);
-		size_t first = 0, tails = 0;
-		double peak = 0, tail_max = 0;
-		const size_t bad = differ(out, ref, &first, &peak, 1e-30f, &tails, &tail_max);
+		size_t first = 0;
+		double peak = 0;
+		const size_t bad = differ(out, ref, &first, &peak);
 		char what[320];
-		std::snprintf(what, sizeof what, "MIDI file (%zu events), %d Hz, host blocks %s: %zu frames (peak %.3f) bit for bit awva_render --midi's x 0.25 (%zu tail frames under 1e-30 differ, at most %.1e)",
-		    m.events.size(), rate, blocks_name(block).c_str(), ref.size(), peak, tails, tail_max);
+		std::snprintf(what, sizeof what, "MIDI file (%zu events), %d Hz, host blocks %s: %zu frames (peak %.3f) bit for bit awva_render --ftz --midi's x 0.25",
+		    m.events.size(), rate, blocks_name(block).c_str(), ref.size(), peak);
 		check(!ref.empty() && bad == 0 && peak > 0.001, what);
 		if (bad) std::printf("     %zu frames differ, the first at %zu\n", bad, first);
 	}

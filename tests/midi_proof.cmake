@@ -23,6 +23,6 @@ set(mid "${OUT}/proof_${ENGINE}.mid") # (one per engine: the tests run in parall
 run("${MAKE_MIDI}" "${mid}")
 foreach(rate IN ITEMS 48000 44100) # (44.1 kHz: steps between block starts, the late events' case)
   set(ref "${OUT}/ref_midi_${ENGINE}_${rate}.f32")
-  run("${RENDER}" --engine ${ENGINE} --nv ${nv} --rate ${rate} --midi "${mid}" --out "${ref}")
+  run("${RENDER}" --engine ${ENGINE} --nv ${nv} --rate ${rate} --ftz --midi "${mid}" --out "${ref}") # (--ftz: as the component runs)
   run("${HOST}" midifile "${CLAP}" "${mid}" "${ref}" ${rate})
 endforeach()
