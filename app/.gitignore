@@ -43,3 +43,6 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# flutter test --update-goldens / a failed golden: its diff images
+/test/failures/
