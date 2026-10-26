@@ -12,9 +12,8 @@
 //   --exit-after S       quit after S seconds (smoke runs)
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui' show AppExitResponse, AppExitType;
+import 'dart:ui' show AppExitResponse;
 
-import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import 'src/controller.dart';
@@ -48,13 +47,12 @@ void main(List<String> args) {
   });
   final exitAfter = double.tryParse(_arg(args, '--exit-after') ?? '');
   if (exitAfter != null) {
-    Timer(Duration(milliseconds: (exitAfter * 1000).round()), () async {
+    Timer(Duration(milliseconds: (exitAfter * 1000).round()), () {
       final s = core.status();
       stdout.writeln('awva: ${core.audio().state}, ${s.midiEvents} MIDI messages, ${s.faults} faults');
       controller.dispose();
-      core.stop();
-      // (through the platform, as a window close: exit() under a running engine aborts on macOS)
-      await ServicesBinding.instance.exitApplication(AppExitType.required);
+      core.stop(); // (its threads joined and the probe file finished before the process ends)
+      exit(0);
     });
   }
   runApp(AwvaApp(controller: controller));
