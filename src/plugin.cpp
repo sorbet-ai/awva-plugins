@@ -29,7 +29,7 @@
 // component's load_preset) through preset-load. State: the sound as an awva-preset/1 file (the
 // component's save_preset), with the plugin's own beside it in one more key ("awva-plugin": the
 // output level, legato, the factory preset it started from), which a preset reader skips.
-// Output: stereo (a mono engine on both channels), x0.25 as the board, subnormals flushed.
+// Output: stereo (a mono engine on both channels), x0.25 (awva_render's WAV scaling), subnormals flushed.
 #include <clap/clap.h>
 
 #include <algorithm>
@@ -51,8 +51,8 @@
 
 namespace {
 
-constexpr float kGain = 0.25f;  // the board's unity (awva_render's WAV scaling)
-constexpr int kMaxVoices = 10;  // the board's (awva_render's default)
+constexpr float kGain = 0.25f;  // unity (awva_render's WAV scaling: the engines run about +-4)
+constexpr int kMaxVoices = 10;  // (awva_render's default)
 constexpr clap_id kLegatoId = 1; // (an engine parameter's id is FNV-1a of its name: never 1, the tests check)
 constexpr const char* kVendor = "Sorbet AI";
 constexpr const char* kVersion = "0.1.0";

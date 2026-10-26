@@ -1,6 +1,8 @@
+<p align="center"><img src="docs/logo/awva.svg" alt="awva" width="480"></p>
+
 # awva-plugins
 
-The [awva](https://github.com/sorbet-ai/awva) sound engines as instrument plugins: every engine as a CLAP, a VST3 and an Audio Unit (AUv2). The engines are expressive per-note engines, played by MIDI 2.0, MPE or CLAP note expressions.
+[awva](https://github.com/sorbet-ai/awva) is a set of portable, expressive per-note sound engines. The same engine code runs on PCs and on embedded devices, and is played by MIDI 2.0 and MPE. awva-plugins brings the engines to DAWs: every engine as a CLAP, a VST3 and an Audio Unit (AUv2), also played by CLAP note expressions.
 
 - **Formats:**
   - CLAP on Windows and macOS;
@@ -97,8 +99,12 @@ tools/package.sh windows-x64      # or macos-universal: dist/awva-plugins-<versi
 - **vst3_presets:** a minimal VST3 host (the VST3 SDK's hosting module) reads the VST3's preset list. It must hold the factory presets, by name and in order.
 - **perf:** the engine's default preset playing the awva SDK's default scripted performance.
   - The proof runs it through the plugin by a private test extension, `com.sorbet-ai.awva.voice-controls/1`; a DAW never uses it.
-  - The output must equal `awva_render`'s × 0.25, subnormals flushed, bit for bit, at host blocks of 256, 1, 33 and random sizes.
-- **midi:** a Standard MIDI File (MPE notes with bends, pressure and CC74, a master-channel note, the pedal) in the MIDI dialect, each event at its time rounded to the nearest frame. The output must equal `awva_render --midi`'s � 0.25, bit for bit, at 48 and 44.1 kHz and host blocks of 256, 1, 33 and random sizes. The plugin and the renderer take MIDI by the same integer-frame step rule.
+  - The output must equal `awva_render`'s × 0.25, subnormals flushed, bit for bit, at host blocks of 256, 1, 33 and random sizes (tails excepted, below).
+- **midi:** a Standard MIDI File (MPE notes with bends, pressure and CC74, a master-channel note, the pedal) in the MIDI dialect, each event at its time rounded to the nearest frame. The output must equal `awva_render --midi`'s × 0.25, bit for bit, at 48 and 44.1 kHz and host blocks of 256, 1, 33 and random sizes. The plugin and the renderer take MIDI by the same integer-frame step rule.
+
+**Tails:** the component runs with subnormals flushed (awva's `nsc/no_denormals.h`, which keeps idle engines cheap on a PC), and `awva_render` doesn't. So in a decaying tail some frames differ.
+- The perf and midi proofs allow those frames only where both values are below 1e-30. The largest seen is 1e-31.
+- Every other frame must match bit for bit, and so must every frame of the ump proof, whose reference is the component itself.
 - **ump:** MIDI 2.0 and MIDI 1.0 input, polyphonic and legato, at 48 and 44.1 kHz and host blocks of 256, 1, 33 and random sizes. The output must equal, bit for bit, the engine's own component library given the same UMP at the same frames.
 - **notes:** CLAP notes and expressions must give the same output as their MIDI 2.0 translation, whatever the host block size, with a NOTE_END for each note.
 - **many:** 20 overlapping CLAP notes, each with its own brightness:

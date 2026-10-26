@@ -20,3 +20,6 @@ the release archive's licenses/ directory):
 - The AudioUnitSDK 1.1.0 (the AU binaries), Copyright Apple Inc., Apache-2.0.
 
 None of the binaries contains GPL code.
+
+The awva name and logo (docs/logo/) are Sorbet AI's; the Apache License does not grant
+permission to use them (its section 6), beyond describing the origin of the work.
