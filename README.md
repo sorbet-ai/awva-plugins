@@ -90,12 +90,13 @@ tools/package.sh windows-x64      # or macos-universal: dist/awva-plugins-<versi
 
 **Dependencies:** `fetch_deps.sh` puts each one in its own directory under `deps/`. Each is checked against a pinned commit or SHA-256. awva itself is pinned by `AWVA_COMMIT`: a change in awva reaches the plugins only through a bump of that file.
 
-**Proofs:** `ctest -L plugin` runs seven of them on each engine.
+**Proofs:** `ctest -L plugin` runs eight of them on each engine.
 - **info:** the plugin matches its component: the same id, name, parameters and presets. It also checks:
   - the ports;
   - preset loading, by index and from each of awva's preset files, which give their factory preset's values bit for bit;
   - a state round trip, both active and inactive;
   - that a restored project is exact, in the four cases above.
+- **conformance:** awva's `awva_conformance`, the component ABI's conformance checks (awva's `docs/conformance.md`), on the engine's component as the plugins build it: the same `awva_add_component`, here built as a loadable library. A component change that breaks the ABI contract fails this repository's CI too. The engines' known failures are awva's own (`sdk/tests/known_failures.cmake`), and they are reported as warnings, as they are in awva.
 - **vst3_presets:** a minimal VST3 host (the VST3 SDK's hosting module) reads the VST3's preset list. It must hold the factory presets, by name and in order.
 - **perf:** the engine's default preset playing the awva SDK's default scripted performance.
   - The proof runs it through the plugin by a private test extension, `com.sorbet-ai.awva.voice-controls/1`; a DAW never uses it.

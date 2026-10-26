@@ -141,6 +141,14 @@ target_include_directories(clap_host_test PRIVATE "${CLAP_SDK_ROOT}/include" "${
 target_link_libraries(clap_host_test PRIVATE awva_sdk awva_performances ${CMAKE_DL_LIBS})
 target_compile_definitions(clap_host_test PRIVATE $<$<PLATFORM_ID:Windows>:_CRT_SECURE_NO_WARNINGS>)
 add_dependencies(clap_host_test awva_render nsc_components make_test_midi)
+
+# the component ABI's conformance (awva's awva_conformance, docs/conformance.md) on each engine's
+# component as the plugins build it: the same awva_add_component, here as a loadable library. A
+# component change that breaks the ABI contract fails this CI too. The engines' known failures are
+# awva's own (sdk/tests/known_failures.cmake), reported as warnings as they are there.
+include("${AWVA_DIR}/sdk/tests/known_failures.cmake")
+add_custom_target(awva_plugin_conformance ALL)
+add_dependencies(awva_plugin_conformance awva_conformance)
 # vst3_programs: a minimal VST3 host (the VST3 SDK's hosting module) that reads the VST3's preset list
 set(_vh "${VST3_SDK_ROOT}/public.sdk/source/vst/hosting")
 add_executable(vst3_programs tests/vst3_programs.cpp "${_vh}/module.cpp" "${_vh}/hostclasses.cpp" "${_vh}/pluginterfacesupport.cpp"
@@ -173,6 +181,15 @@ foreach(v IN LISTS AWVA_PLUGIN_ENGINES)
     "-DMAKE_MIDI=$<TARGET_FILE:make_test_midi>" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/midi_proof.cmake")
   add_test(NAME plugin.${v}.ump COMMAND clap_host_test ump "${_clap}" "${_lib}")
   add_test(NAME plugin.${v}.notes COMMAND clap_host_test notes "${_clap}")
+  awva_add_component(awva_${v}_conformance_lib ${v} MODULE)
+  set_target_properties(awva_${v}_conformance_lib PROPERTIES OUTPUT_NAME "conformance_${v}" PREFIX ""
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/conformance")
+  add_dependencies(awva_plugin_conformance awva_${v}_conformance_lib)
+  # (one test per engine: awva_conformance runs every check on the library, its known failures as warnings)
+  set(_known ${AWVA_KNOWN_${v}} ${AWVA_KNOWN_COMPONENT})
+  list(JOIN _known "," _known)
+  add_test(NAME plugin.${v}.conformance COMMAND awva_conformance "$<TARGET_FILE:awva_${v}_conformance_lib>" "--known=${_known}")
+  set_tests_properties(plugin.${v}.conformance PROPERTIES LABELS "plugin;conformance")
   add_test(NAME plugin.${v}.vst3_presets COMMAND vst3_programs "${CMAKE_BINARY_DIR}/awva_${v}.vst3" "${_lib}")
   add_test(NAME plugin.${v}.many COMMAND clap_host_test many "${_clap}" "${_lib}")
   set_tests_properties(plugin.${v}.info plugin.${v}.perf plugin.${v}.ump plugin.${v}.notes plugin.${v}.many plugin.${v}.midi plugin.${v}.vst3_presets PROPERTIES LABELS plugin)
