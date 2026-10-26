@@ -31,9 +31,13 @@ uint64_t now_ns() {
 	LARGE_INTEGER c;
 	QueryPerformanceCounter(&c);
 	return static_cast<uint64_t>(static_cast<double>(c.QuadPart) * scale);
-#else
+#elif defined(__APPLE__)
 	timespec ts;
 	clock_gettime(CLOCK_UPTIME_RAW, &ts); // (mach_absolute_time's clock, CoreMIDI's and CoreAudio's host time)
+	return static_cast<uint64_t>(ts.tv_sec) * 1000000000ull + static_cast<uint64_t>(ts.tv_nsec);
+#else
+	timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
 	return static_cast<uint64_t>(ts.tv_sec) * 1000000000ull + static_cast<uint64_t>(ts.tv_nsec);
 #endif
 }
@@ -75,18 +79,26 @@ std::string core_dir() {
 std::string app_data_dir() {
 #if defined(_WIN32)
 	return join(known_folder(FOLDERID_RoamingAppData), "awva");
-#else
+#elif defined(__APPLE__)
 	const char* h = std::getenv("HOME");
 	return join(join(h ? h : ".", "Library/Application Support"), "awva");
+#else
+	const char* x = std::getenv("XDG_DATA_HOME");
+	const char* h = std::getenv("HOME");
+	return join(x && *x ? std::string(x) : join(h ? h : ".", ".local/share"), "awva");
 #endif
 }
 
 std::string cache_dir() {
 #if defined(_WIN32)
 	return join(join(known_folder(FOLDERID_LocalAppData), "awva"), "cache");
-#else
+#elif defined(__APPLE__)
 	const char* h = std::getenv("HOME");
 	return join(join(h ? h : ".", "Library/Caches"), "awva");
+#else
+	const char* x = std::getenv("XDG_CACHE_HOME");
+	const char* h = std::getenv("HOME");
+	return join(x && *x ? std::string(x) : join(h ? h : ".", ".cache"), "awva");
 #endif
 }
 
@@ -170,8 +182,10 @@ std::string file_stamp(const std::string& dir) {
 const char* library_suffix() {
 #if defined(_WIN32)
 	return ".dll";
-#else
+#elif defined(__APPLE__)
 	return ".dylib";
+#else
+	return ".so";
 #endif
 }
 
