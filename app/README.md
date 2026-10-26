@@ -2,7 +2,7 @@
 
 The awva engines as an instrument of their own, for Windows and macOS: pick an engine and a
 preset, shape it with its hero knobs, play it from any MIDI 2.0, MPE or MIDI 1.0 controller. The
-same screen is what the plugins will show in a DAW (`DESIGN.md`).
+same design is what the plugins show in a DAW, drawn natively (`DESIGN.md`).
 
 - **`core/`**: the engine, MIDI, audio and safety, in C++ (`core/include/awva_app/awva_app.h`, a C
   ABI). It is built by this repository's own build, with the plugins' toolchain and awva, so the
