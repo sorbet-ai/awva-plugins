@@ -11,8 +11,14 @@
 //       MPE controller stream sent in real time through awva_ump() (the same rings, timestamps and
 //       frames as a port's messages), the output tapped to OUT.wav; checks that it sounds and that
 //       no sample passes the limiter's ceiling
+//   awva_app_cli check --engine KEY [--against KEY] [--engines DIR] [--builtin DIR]
+//       an engine as the app would play it: listed and playable (else its reason, exit 1), every
+//       preset rendered offline (the MPE controller phrase, 3 s, 0 dB): finite, sounding, its peak
+//       and RMS; with --against another engine (e.g. builtin:<id>), every preset compared sample
+//       for sample with that engine's preset of the same name
 //   awva_app_cli render --engine KEY [--preset I] [--seconds S] [--rate R] [--master-db DB] --out OUT.wav
 //       the MPE controller stream rendered offline through the same Player and safety chain
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -93,6 +99,68 @@ int smoke(int argc, char** argv) {
 	return ok ? 0 : 1;
 }
 
+int check(int argc, char** argv) {
+	Catalog cat;
+	cat.scan(arg(argc, argv, "--builtin", join(core_dir(), "engines")), arg(argc, argv, "--engines", join(app_data_dir(), "engines")));
+	const std::string key = arg(argc, argv, "--engine"), vs = arg(argc, argv, "--against");
+	const Engine* e = cat.find(key);
+	if (!e) {
+		std::printf("check: %s isn't listed\n", key.c_str());
+		return 1;
+	}
+	if (!e->ok) {
+		std::printf("check: %s is refused: %s\n", key.c_str(), e->error.c_str());
+		return 1;
+	}
+	const Engine* ref = vs.empty() ? nullptr : cat.find(vs);
+	if (!vs.empty() && (!ref || !ref->ok)) {
+		std::printf("check: %s (to compare with) isn't playable\n", vs.c_str());
+		return 1;
+	}
+	std::printf("check: %s \"%s\": %s %s, %zu presets\n", key.c_str(), e->label.c_str(), e->c->desc->name, e->c->desc->version, e->presets.size());
+	for (const std::string& r : e->refused) std::printf("  preset refused: %s\n", r.c_str());
+	const int rate = 48000;
+	const std::vector<TimedUmp> ev = mpe_controller_performance(rate, 3.0);
+	bool ok = e->refused.empty();
+	const size_t n = e->presets.empty() ? 1 : e->presets.size();
+	for (size_t i = 0; i < n; i++) {
+		const PresetEntry* p = e->presets.empty() ? nullptr : &e->presets[i];
+		std::vector<float> l, r;
+		if (!render_offline(*e->c, p, false, ev, rate * 3, rate, 0.0f, &l, &r)) {
+			std::printf("  %-24s doesn't render\n", p ? p->name.c_str() : "(default)");
+			ok = false;
+			continue;
+		}
+		double peak = 0, sq = 0;
+		bool finite = true;
+		for (size_t k = 0; k < l.size(); k++) {
+			finite = finite && std::isfinite(l[k]) && std::isfinite(r[k]);
+			peak = std::max(peak, static_cast<double>(std::fabs(l[k])));
+			sq += static_cast<double>(l[k]) * l[k];
+		}
+		const double rms = std::sqrt(sq / std::max<size_t>(1, l.size()));
+		const bool sounds = finite && rms > 1e-5;
+		std::string cmp;
+		if (ref) {
+			const PresetEntry* q = nullptr;
+			for (const PresetEntry& x : ref->presets)
+				if (p && x.name == p->name) q = &x;
+			std::vector<float> rl, rr;
+			if (p && !q) cmp = "  (no preset of that name to compare)";
+			else if (render_offline(*ref->c, q, false, ev, rate * 3, rate, 0.0f, &rl, &rr)) {
+				size_t diff = 0;
+				for (size_t k = 0; k < l.size() && k < rl.size(); k++) diff += std::memcmp(&l[k], &rl[k], 4) != 0 || std::memcmp(&r[k], &rr[k], 4) != 0;
+				cmp = diff ? "  differs from " + vs + " in " + std::to_string(diff) + " frames" : "  bit for bit " + vs + "'s";
+			}
+		}
+		std::printf("  %-24s %s peak %6.1f dBFS, rms %6.1f dBFS%s\n", p ? p->name.c_str() : "(default)", sounds ? "ok  " : "FAIL",
+		    20 * std::log10(std::max(peak, 1e-12)), 20 * std::log10(std::max(rms, 1e-12)), cmp.c_str());
+		ok = ok && sounds;
+	}
+	std::printf("check: %s\n", ok ? "ok" : "FAILED");
+	return ok ? 0 : 1;
+}
+
 int render(int argc, char** argv) {
 	Catalog cat;
 	std::string builtin = arg(argc, argv, "--builtin", join(core_dir(), "engines"));
@@ -131,6 +199,7 @@ int main(int argc, char** argv) {
 	}
 	if (mode == "smoke") return smoke(argc, argv);
 	if (mode == "render") return render(argc, argv);
-	std::fprintf(stderr, "usage: awva_app_cli list|smoke|render [options] (see the source's header)\n");
+	if (mode == "check") return check(argc, argv);
+	std::fprintf(stderr, "usage: awva_app_cli list|check|smoke|render [options] (see the source's header)\n");
 	return 2;
 }

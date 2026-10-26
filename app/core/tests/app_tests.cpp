@@ -18,6 +18,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -33,6 +34,15 @@
 using namespace awva_app;
 
 static bool nsc_load_check(const std::string& path, nsc_library* out) { return nsc_load(path.c_str(), out) == 0; }
+static std::string read_back(const std::string& path) {
+	std::string s;
+	read_file(path, &s);
+	return s;
+}
+static void remove_all(const std::string& path) {
+	std::error_code ec;
+	std::filesystem::remove_all(std::filesystem::u8path(path), ec);
+}
 
 namespace {
 
@@ -177,6 +187,28 @@ void package_checks(const std::string& builtin, const std::string& scratch) {
 	Json s;
 	check(Json::parse(awva_sound(), &s) && s.num("preset", -1) == 0 && s.get("heroes") && !s.get("heroes")->a.empty(), "the sound: its preset and heroes");
 	check(awva_select_engine("package:broken-engine") != 0 && std::strlen(awva_last_error()) > 0, "a refused package can't be played, and says why");
+
+	// a package written while the core runs: listed at the next refresh, by itself; a hidden folder
+	// (one being written) never
+	awva_status st0;
+	awva_status_get(&st0);
+	const std::string hidden = mkpkg(root, ".va-iter9", "{\"format\": \"awva-package/1\", \"label\": \"half written\", \"engine\": \"va\"}");
+	write_file(join(join(hidden, "presets"), "01-fit.preset.json"), read_back(join(join(root, "va-fit"), "presets/01-fit.preset.json")));
+	awva_midi_refresh();
+	check(std::string(awva_catalog()).find("half written") == std::string::npos, "a hidden folder (a package being written) isn't listed");
+	std::rename(hidden.c_str(), join(root, "va-iter9").c_str());
+	awva_midi_refresh();
+	awva_status st1;
+	awva_status_get(&st1);
+	check(std::string(awva_catalog()).find("package:va-iter9") != std::string::npos && st1.catalog != st0.catalog,
+	    "a package that appears while the core runs is listed at the next refresh, and the UI is told");
+	// the package playing, its folder removed: it keeps playing, the sound still there
+	check(awva_select_engine("package:va-iter9") == 0, "the new package plays");
+	remove_all(join(root, "va-iter9"));
+	awva_midi_refresh();
+	Json snd;
+	check(Json::parse(awva_sound(), &snd) && snd.get("engine") && snd.get("engine")->str("key") == "package:va-iter9",
+	    "a package removed while it plays keeps playing (its entry kept)");
 	awva_stop();
 }
 

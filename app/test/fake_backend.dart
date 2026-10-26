@@ -38,7 +38,10 @@ class FakeBackend implements AwvaBackend {
   @override
   String enginesDir() => r'C:\Users\you\AppData\Roaming\awva\engines';
   @override
-  int rescan() => _catalog.length;
+  int rescan() {
+    calls.add('rescan');
+    return _catalog.length;
+  }
   @override
   bool selectEngine(String key) {
     calls.add('engine $key');

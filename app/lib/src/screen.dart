@@ -5,6 +5,7 @@
 // level, the theme, settings), the sound (its name and its hero knobs, every parameter below on
 // request), the footer (audio and MIDI in one line), and the settings panel over the right edge.
 // The same screen is the plugins' editor, without the engine picker and the device settings.
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import 'controller.dart';
@@ -62,6 +63,17 @@ class _MainScreenState extends State<MainScreen> {
   @override
   Widget build(BuildContext context) {
     final c = AwvaTheme.of(context);
+    // Ctrl+R (Cmd+R on macOS): scan the engines folder again
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.keyR, control: true): k.rescan,
+        const SingleActivator(LogicalKeyboardKey.keyR, meta: true): k.rescan,
+      },
+      child: Focus(autofocus: true, child: _screen(c)),
+    );
+  }
+
+  Widget _screen(AwvaColors c) {
     return ColoredBox(
       color: c.bg0,
       child: DefaultTextStyle(
@@ -188,6 +200,7 @@ class _Header extends StatelessWidget {
         onTap: () => k.selectEngine(e.key),
       ));
     }
+    items.add(MenuItem(title: 'Rescan your engines', trailing: 'Ctrl+R', onTap: k.rescan));
     showMenuAt(anchor, items, width: 300);
   }
 

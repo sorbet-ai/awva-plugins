@@ -36,7 +36,7 @@ class Controller extends ChangeNotifier {
 
   /// the status: its own notifier, so the meters repaint without the whole screen
   final status = ValueNotifier<Status>(const Status());
-  int _generation = -1, _midiSeen = 0;
+  int _generation = -1, _midiSeen = 0, _catalog = -1;
 
   /// MIDI activity: the time of the last message seen
   final midiActive = ValueNotifier<bool>(false);
@@ -57,6 +57,13 @@ class Controller extends ChangeNotifier {
     status.value = s;
     if (s.generation != _generation) {
       _generation = s.generation;
+      sound = core.sound();
+      notifyListeners();
+    }
+    if (s.catalog != _catalog) {
+      // (a package came, went or changed: the core scanned again)
+      _catalog = s.catalog;
+      engines = core.catalog();
       sound = core.sound();
       notifyListeners();
     }

@@ -68,6 +68,19 @@ void main() {
     expect(core.calls, contains('engine builtin:va'));
   });
 
+  testWidgets('Ctrl+R and the engine menu scan the engines again', (t) async {
+    final core = await _pump(t);
+    await t.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await t.sendKeyEvent(LogicalKeyboardKey.keyR);
+    await t.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    expect(core.calls.where((c) => c == 'rescan'), hasLength(1));
+    await t.tap(find.text('Bowed Strings'));
+    await t.pumpAndSettle();
+    await t.tap(find.text('Rescan your engines'));
+    await t.pumpAndSettle();
+    expect(core.calls.where((c) => c == 'rescan'), hasLength(2));
+  });
+
   testWidgets('the theme follows the OS, and the choice is kept by the core', (t) async {
     final core = await _pump(t, b: Brightness.dark);
     await t.tap(find.bySemanticsLabel('light or dark'));

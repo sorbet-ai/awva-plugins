@@ -52,6 +52,8 @@ typedef struct awva_status {
 	uint32_t faults;        /* blocks muted for a broken engine output (non-finite, or past the awva
 	                           contract's bound of 8): the engine was reset */
 	int32_t engine_stopped; /* 1: the package's engine broke the bound and is stopped (choose another) */
+	uint32_t catalog;       /* changes when the engines were scanned again (a package came or went):
+	                           read awva_catalog() again */
 } awva_status;
 
 AWVA_APP_API int32_t awva_abi(void);
@@ -72,7 +74,8 @@ AWVA_APP_API void awva_stop(void);
 AWVA_APP_API const char* awva_catalog(void);
 /* the packages folder the core scans */
 AWVA_APP_API const char* awva_engines_dir(void);
-/* scan the packages folder again; returns the number of engines */
+/* scan the packages folder again; returns the number of engines (awva_midi_refresh() also does it
+ * by itself when the folder changed) */
 AWVA_APP_API int32_t awva_rescan(void);
 /* play an engine by its catalog key; 0, or -1 (unknown or refused) */
 AWVA_APP_API int32_t awva_select_engine(const char* key);

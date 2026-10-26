@@ -81,6 +81,7 @@ public:
 		user_dir_ = o.str("engines_dir", join(app_data_dir(), "engines"));
 		make_dirs(user_dir_);
 		catalog_.scan(builtin_dir_, user_dir_);
+		folder_ = Catalog::signature(user_dir_);
 
 		no_audio_ = o.flag("no_audio", false);
 		audio_ = no_audio_ ? make_null_audio(48000) : make_device_audio();
@@ -148,12 +149,20 @@ public:
 	const Catalog& catalog() const { return catalog_; }
 	const std::string& engines_dir() const { return user_dir_; }
 	int rescan() {
+		if (engine_) playing_ = *engine_; // (the engine playing keeps playing, its package gone or not)
 		catalog_.scan(builtin_dir_, user_dir_);
-		// (the engine playing keeps playing; its entry is found again by key)
+		folder_ = Catalog::signature(user_dir_);
 		engine_ = catalog_.find(engine_key_);
+		if (!engine_ && !engine_key_.empty()) engine_ = &playing_;
 		if (engine_ && preset_ >= static_cast<int>(engine_->presets.size())) preset_ = -1;
+		catalog_gen_++;
 		return static_cast<int>(catalog_.engines().size());
 	}
+	// the packages folder changed since the last scan: scan it again
+	void rescan_if_changed() {
+		if (Catalog::signature(user_dir_) != folder_) rescan();
+	}
+	uint32_t catalog_generation() const { return catalog_gen_; }
 
 	int select_engine(const std::string& key) {
 		drain_rets();
@@ -255,6 +264,7 @@ public:
 		o->xruns = xruns_.load();
 		o->faults = faults_.load();
 		o->engine_stopped = stopped_.load();
+		o->catalog = catalog_gen_;
 	}
 
 	std::string midi_json() {
@@ -270,6 +280,7 @@ public:
 	void midi_refresh() {
 		drain_rets();
 		if (midi_) midi_->refresh();
+		rescan_if_changed(); // (a package written while the app runs is listed within two seconds)
 		// the system's default output changed: play on the new one (faded in, as at the start)
 		if (!no_audio_ && audio_ && audio_->take_default_changed()) (void)restart_audio();
 	}
@@ -497,6 +508,9 @@ private:
 	}
 
 	Catalog catalog_;
+	Engine playing_;     // the playing engine's entry, should a rescan lose it
+	std::string folder_; // the packages folder at the last scan (Catalog::signature)
+	uint32_t catalog_gen_ = 0;
 	std::string builtin_dir_, user_dir_, settings_path_;
 	std::map<std::string, std::string> settings_;
 	bool no_audio_ = false, shut_ = false;

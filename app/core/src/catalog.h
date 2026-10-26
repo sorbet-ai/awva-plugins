@@ -40,6 +40,9 @@ public:
 	const std::vector<Engine>& engines() const { return engines_; }
 	const Engine* find(const std::string& key) const;
 	std::string json() const;
+	// what the packages folder holds now (folders, their files' sizes and times): a new value means
+	// a package came, went or changed
+	static std::string signature(const std::string& user_dir);
 	~Catalog();
 
 private:

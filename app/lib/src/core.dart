@@ -113,10 +113,14 @@ class Status {
     this.xruns = 0,
     this.faults = 0,
     this.engineStopped = false,
+    this.catalog = 0,
   });
   final double peakL, peakR, reductionDb, masterDb, cpu;
   final int voices, audioState, sampleRate, bufferFrames, midiEvents, generation, xruns, faults;
   final bool engineStopped;
+
+  /// changes when the engines were scanned again (a package came or went)
+  final int catalog;
 }
 
 abstract class AwvaBackend {
@@ -153,6 +157,8 @@ final class _Status extends Struct {
   external int midiEvents, generation, xruns, faults;
   @Int32()
   external int engineStopped;
+  @Uint32()
+  external int catalog;
 }
 
 typedef _Str = Pointer<Utf8> Function();
@@ -278,6 +284,7 @@ class FfiBackend implements AwvaBackend {
       xruns: s.xruns,
       faults: s.faults,
       engineStopped: s.engineStopped != 0,
+      catalog: s.catalog,
     );
   }
 
