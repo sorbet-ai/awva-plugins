@@ -9,13 +9,15 @@
 #   deps/awva-<commit>         sorbet-ai/awva at AWVA_COMMIT: dsp/ sdk/ component/ presets/ tools/harness/
 #                              third_party/doctest (from GitHub, or a local checkout: AWVA=<path>)  Apache-2.0
 #   deps/clap-1.2.10           free-audio/clap 1.2.10                                       MIT
-#   deps/clap-wrapper-0.17.0   free-audio/clap-wrapper v0.17.0                              MIT
 #   deps/vst3sdk-3.8.0         steinbergmedia/vst3sdk v3.8.0_build_66 (clap-wrapper 0.17.0's;
 #                              base, pluginterfaces, public.sdk)                            MIT
 #   deps/AudioUnitSDK-1.1.0    apple/AudioUnitSDK 1.1.0 (macOS)                             Apache-2.0
 #   with --validators (tests only, never linked or shipped):
-#   deps/clap-validator-0.4.1-<os>   free-audio/clap-validator 0.4.1 release              MIT
+#   deps/clap-validator        built (cargo build --release --locked) from the submodule
+#                              third_party/clap-validator, Sorbet AI's fork            MIT
 #   deps/pluginval-1.0.4-<os>        Tracktion/pluginval v1.0.4 release                   GPLv3
+# clap-wrapper and clap-validator are git submodules (third_party/: Sorbet AI's forks, pinned by
+# commit; docs/forked_dependencies.md), checked out here first.
 # Usage: ./fetch_deps.sh [--validators]      (AWVA=/path/to/awva: that checkout's commit, not GitHub's)
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -26,6 +28,8 @@ Darwin) os=macos ;;
 MINGW* | MSYS* | CYGWIN*) os=windows ;;
 *) os=linux ;;
 esac
+
+git -C "$HERE" -c core.autocrlf=false submodule update --init third_party/clap-wrapper third_party/clap-validator
 
 clone() { # dir url tag commit [submodule...]: the submodules at the commits the pinned commit records
   if [ -d "$D/$1" ]; then
@@ -76,7 +80,6 @@ if [ ! -d "$D/awva-${A:0:7}" ]; then
   mv "$D/awva-${A:0:7}.tmp" "$D/awva-${A:0:7}"
 fi
 clone clap-1.2.10 https://github.com/free-audio/clap.git 1.2.10 195b42a004144fab0b3cf95e9c067187d15365b7
-clone clap-wrapper-0.17.0 https://github.com/free-audio/clap-wrapper.git v0.17.0 806bba0a5f792e3966b99c1561ab9952d3316d7c
 # (the VST3 SDK: only what clap-wrapper compiles, not its docs, samples or VSTGUI)
 clone vst3sdk-3.8.0 https://github.com/steinbergmedia/vst3sdk.git v3.8.0_build_66 9fad9770f2ae8542ab1a548a68c1ad1ac690abe0 base pluginterfaces public.sdk
 if [ $os = macos ]; then
@@ -84,15 +87,16 @@ if [ $os = macos ]; then
 fi
 
 if [ "${1:-}" = --validators ]; then
-  R=https://github.com/free-audio/clap-validator/releases/download/0.4.1
+  # clap-validator from the fork's source, its dependencies as its Cargo.lock pins them (Rust 1.95 or
+  # later: its MSRV)
+  cargo build -q --release --locked --manifest-path "$HERE/third_party/clap-validator/Cargo.toml" --bin clap-validator \
+    --target-dir "$D/clap-validator"
   P=https://github.com/Tracktion/pluginval/releases/download/v1.0.4
   case $os in
   windows)
-    download clap-validator-0.4.1-windows "$R/clap-validator-0.4.1-127-g152b982-windows.zip" d935c3af0a45c3911ea2e900f4aa5d6709dac82bb485f0c4ce28648ab2cd0c10
     download pluginval-1.0.4-windows "$P/pluginval_Windows.zip" c08e61ce3b96db41636f8ec7e76f4c7e2c13ebdac7fa1b5a1f52b4f32ec715ab
     ;;
   macos)
-    download clap-validator-0.4.1-macos "$R/clap-validator-0.4.1-127-g152b982-macos-universal.zip" bbec8cd7d18274e549d5d8c12ece3cec54be966129388dd2e742b9957f2ba9f1
     download pluginval-1.0.4-macos "$P/pluginval_macOS.zip" 3c4c533bda0c5059eea3ddaea752d757ee2025041f0f47e6bcb0e87f6082b29f
     ;;
   *)

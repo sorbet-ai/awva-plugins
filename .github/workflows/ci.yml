@@ -3,7 +3,8 @@
 #
 # awva-plugins CI, on Windows (x64) and macOS (universal):
 #   1. Fetch awva at AWVA_COMMIT, the dependencies and the validators (fetch_deps.sh: each pinned
-#      by commit or SHA-256).
+#      by commit or SHA-256; clap-wrapper and clap-validator are submodules, Sorbet AI's forks, and
+#      clap-validator is built from its source).
 #   2. Build every engine as CLAP, VST3 and (macOS) AU.
 #   3. The bit-identity proofs (ctest -L plugin).
 #   4. clap-validator, pluginval at strictness 10 on the VST3, and on macOS auval -strict, with the
@@ -47,10 +48,13 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v5
+        with:
+          submodules: true # (third_party/: the clap-wrapper and clap-validator forks)
       - name: tools
         run: |
           if [ "$RUNNER_OS" = Windows ]; then command -v ninja || choco install ninja -y; fi
           if [ "$RUNNER_OS" = macOS ]; then brew list ninja > /dev/null 2>&1 || brew install ninja; fi
+          rustup toolchain install stable --profile minimal && rustup default stable # (clap-validator: Rust 1.95 or later)
       - name: dependencies
         run: ./fetch_deps.sh --validators
       - name: build

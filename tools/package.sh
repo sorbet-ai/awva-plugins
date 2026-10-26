@@ -26,16 +26,17 @@ cp "$HERE/LICENSE" "$HERE/NOTICE" "$HERE/README.md" "$out/"
 # every licence the binaries are under (NOTICE says which applies to what)
 L="$out/licenses"
 D="$HERE/deps"
+W="$HERE/third_party/clap-wrapper"
 A="awva-$(head -c 7 "$HERE/AWVA_COMMIT")"
 mkdir -p "$L"
 cp "$D/$A/LICENSE" "$L/awva-LICENSE.txt"
 cp "$D/$A/NOTICE" "$L/awva-NOTICE.txt"
 cp "$D/$A/PROVENANCE.md" "$L/awva-PROVENANCE.md" # (the fastapprox BSD-3-Clause notice)
 cp "$D/clap-1.2.10/LICENSE" "$L/clap-LICENSE.txt"
-cp "$D/clap-wrapper-0.17.0/LICENSE" "$L/clap-wrapper-LICENSE.txt"
-sed -n '1,/\*\//p' "$D/clap-wrapper-0.17.0/libs/fmt/fmt/format.h" > "$L/fmt-LICENSE.txt"
+cp "$W/LICENSE" "$L/clap-wrapper-LICENSE.txt"
+sed -n '1,/\*\//p' "$W/libs/fmt/fmt/format.h" > "$L/fmt-LICENSE.txt"
 cp "$D/vst3sdk-3.8.0/LICENSE.txt" "$L/vst3sdk-LICENSE.txt"
-cp "$D/clap-wrapper-0.17.0/libs/psl/README.md" "$L/presonus-plugin-extensions-README.md" # (public domain)
+cp "$W/libs/psl/README.md" "$L/presonus-plugin-extensions-README.md" # (public domain)
 if [ "$(uname -s)" = Darwin ]; then cp "$D/AudioUnitSDK-1.1.0/LICENSE.txt" "$L/AudioUnitSDK-LICENSE.txt"; fi
 if [ "$(uname -s)" = Darwin ]; then
   (cd "$HERE/dist" && ditto -c -k --keepParent "$name" "$name.zip")

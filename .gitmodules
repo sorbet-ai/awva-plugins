@@ -1,0 +1,8 @@
+[submodule "third_party/clap-wrapper"]
+	path = third_party/clap-wrapper
+	url = https://github.com/sorbet-ai/clap-wrapper.git
+	branch = awva
+[submodule "third_party/clap-validator"]
+	path = third_party/clap-validator
+	url = https://github.com/sorbet-ai/clap-validator.git
+	branch = awva

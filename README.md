@@ -95,18 +95,19 @@ A state from another engine, or text that isn't a preset, is refused.
 
 ## Building
 
-You need CMake 3.25 or later, Ninja, Python 3 and git, plus one of:
+You need CMake 3.25 or later, Ninja, Python 3, git and, for the validators, Rust 1.95 or later, plus one of:
 - **Windows:** Visual Studio 2022 (its libraries) and LLVM clang.
 - **macOS:** Xcode and Homebrew's cmake and ninja.
 
 ```
+git clone --recurse-submodules https://github.com/sorbet-ai/awva-plugins.git
 ./fetch_deps.sh --validators
 ./build.sh all          # configure, build, and run the proofs (ctest -L plugin)
 tools/validate.sh       # clap-validator, pluginval 10, and on macOS auval -strict
 tools/package.sh windows-x64      # or macos-universal: dist/awva-plugins-<version>-<platform>.zip
 ```
 
-**Dependencies:** `fetch_deps.sh` puts each one in its own directory under `deps/`. Each is checked against a pinned commit or SHA-256. awva itself is pinned by `AWVA_COMMIT`: a change in awva reaches the plugins only through a bump of that file.
+**Dependencies:** `fetch_deps.sh` puts each one in its own directory under `deps/`. Each is checked against a pinned commit or SHA-256. awva itself is pinned by `AWVA_COMMIT`: a change in awva reaches the plugins only through a bump of that file. clap-wrapper and clap-validator are git submodules under `third_party/`, pinned to commits of Sorbet AI's forks ([docs/forked_dependencies.md](docs/forked_dependencies.md)). `fetch_deps.sh` checks them out and builds clap-validator from its source.
 
 **Proofs:** `ctest -L plugin` runs eight of them on each engine.
 - **info:** the plugin matches its component: the same id, name, parameters and presets. It also checks:
@@ -118,8 +119,8 @@ tools/package.sh windows-x64      # or macos-universal: dist/awva-plugins-<versi
 - **vst3_presets:** a minimal VST3 host (the VST3 SDK's hosting module) reads the VST3's preset list. It must hold the factory presets, by name and in order.
 - **perf:** the engine's default preset playing the awva SDK's default scripted performance.
   - The proof runs it through the plugin by a private test extension, `com.sorbet-ai.awva.voice-controls/1`; a DAW never uses it.
-  - The output must equal `awva_render --ftz`'s × 0.25, bit for bit, at host blocks of 256, 1, 33 and random sizes. `--ftz` runs each block with subnormals flushed, as the component does.
-- **midi:** a Standard MIDI File (MPE notes with bends, pressure and CC74, a master-channel note, the pedal) in the MIDI dialect, each event at its time rounded to the nearest frame. The output must equal `awva_render --ftz --midi`'s × 0.25, bit for bit, at 48 and 44.1 kHz and host blocks of 256, 1, 33 and random sizes. The plugin and the renderer take MIDI by the same integer-frame step rule.
+  - The output must equal `awva_render --ftz`'s x 0.25, bit for bit, at host blocks of 256, 1, 33 and random sizes. `--ftz` runs each block with subnormals flushed, as the component does.
+- **midi:** a Standard MIDI File (MPE notes with bends, pressure and CC74, a master-channel note, the pedal) in the MIDI dialect, each event at its time rounded to the nearest frame. The output must equal `awva_render --ftz --midi`'s x 0.25, bit for bit, at 48 and 44.1 kHz and host blocks of 256, 1, 33 and random sizes. The plugin and the renderer take MIDI by the same integer-frame step rule.
 - **ump:** MIDI 2.0 and MIDI 1.0 input, polyphonic and legato, at 48 and 44.1 kHz and host blocks of 256, 1, 33 and random sizes. The output must equal, bit for bit, the engine's own component library given the same UMP at the same frames.
 - **notes:** CLAP notes and expressions must give the same output as their MIDI 2.0 translation, whatever the host block size, with a NOTE_END for each note.
 - **many:** 20 overlapping CLAP notes, each with its own brightness:
@@ -133,17 +134,11 @@ None of the proofs or validators opens an audio device.
 
 The last run gave the same result on Windows and macOS:
 
-| engine | clap-validator 0.4.1 | pluginval 1.0.4, strictness 10 (VST3) | auval -strict (AU) |
+| engine | clap-validator (fork of 0.4.1), every test | pluginval 1.0.4, strictness 10 (VST3) | auval -strict (AU) |
 |---|---|---|---|
 | all 10 engines | pass | pass | pass |
 
-**Known validator artefacts:** `tools/validate.sh` excludes these tests and says why.
-- **clap-validator `preset-discovery-crawl` and `-load`:** they deadlock inside clap-validator 0.4.1 itself. `begin_preset` holds its result mutex and `flush_preset()` locks it again. The plugins' preset discovery is tested by the info proof instead.
-- **clap-validator `process-varying-sample-rates`:** it activates the plugin at rates from 1 kHz to 768 kHz and fails at the first rate the plugin refuses. The plugins run only the engines' own rates (`min_rate` .. `max_rate`, 11.025 to 192 kHz), and `activate()` refuses others, as CLAP allows. The info proof checks that range.
-- **auval warning:** every AU passes with one warning, "Preset name is not retained in retrieved class data".
-  - auval sets a preset name through `kAudioUnitProperty_PresentPreset`, then reads the class data back.
-  - clap-wrapper 0.17.0's `SaveState` writes its own `_current_program_name` ("Program", or the name of the last state restored), not the preset the AU SDK holds as current (`mCurrentPreset`, which `AUBase::SaveState` would write).
-  - The plugin can't reach that code, so the fix belongs in clap-wrapper. It is drafted in `docs/upstream_reports.md`.
+clap-validator runs all its tests, the preset-discovery ones included. It is built from Sorbet AI's fork, and clap-wrapper is a fork too: [docs/forked_dependencies.md](docs/forked_dependencies.md) lists their changes. The plugins refuse sample rates outside the engines' own range (`min_rate` .. `max_rate`, 11.025 to 192 kHz), as CLAP allows; the validator skips those rates, and the info proof checks the range.
 
 ## Timing
 
@@ -186,11 +181,11 @@ Each archive holds the licence texts in `licenses/`.
 |---|---|---|---|
 | awva (engines, component, SDK) | `AWVA_COMMIT` | every binary | Apache-2.0; includes fastapprox's fastpow2 (BSD-3-Clause) and Faust fast.lib coefficients (Apache-2.0) |
 | CLAP SDK | 1.2.10 | every binary (headers) | MIT |
-| clap-wrapper (with fmt and the PreSonus extensions header) | 0.17.0 | VST3, AU | MIT (fmt: MIT; PreSonus header: public domain) |
+| clap-wrapper (with fmt and the PreSonus extensions header) | Sorbet AI's fork of 0.17.0 (`third_party/clap-wrapper`) | VST3, AU | MIT (fmt: MIT; PreSonus header: public domain) |
 | VST3 SDK (base, pluginterfaces, public.sdk) | 3.8.0 (build 66) | VST3 | MIT |
 | AudioUnitSDK | 1.1.0 | AU | Apache-2.0 |
 | doctest (via awva) | awva's | tests only | MIT |
-| clap-validator | 0.4.1 | CI only, not shipped | MIT |
+| clap-validator | Sorbet AI's fork of 0.4.1 (`third_party/clap-validator`) | CI only, not shipped | MIT |
 | pluginval | 1.0.4 | CI only, not shipped | GPLv3 |
 
 VST is a trademark of Steinberg Media Technologies GmbH.

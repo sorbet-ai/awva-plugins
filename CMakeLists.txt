@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # The awva plugins: every awva engine component (awva/component, nsc.h) as a CLAP, and through
-# clap-wrapper as a VST3 (Windows, macOS) and an AUv2 (macOS), all from the one generic source
+# clap-wrapper (Sorbet AI's fork, the submodule third_party/clap-wrapper: docs/forked_dependencies.md)
+# as a VST3 (Windows, macOS) and an AUv2 (macOS), all from the one generic source
 # (src/plugin.cpp, which sees only nsc.h and CLAP). awva is the AWVA_COMMIT export in deps/ (fetch_deps.sh;
 # AWVA=<checkout> exports that checkout's commit): changing AWVA_COMMIT changes the tree a build uses.
 #
@@ -51,10 +52,14 @@ set(AWVA_VERSION "${AWVA_COMMIT}") # (the components' version, nsc_desc.version:
 add_subdirectory("${AWVA_DIR}/sdk" awva/sdk EXCLUDE_FROM_ALL) # (only what the plugins and proofs use is built)
 set(AWVA_PLUGIN_ENGINES "${AWVA_ENGINES}" CACHE STRING "the engines made into plugins (default: every one)")
 
-# --- clap-wrapper: its functions only ----------------------------------------------------------------
+# --- clap-wrapper (the submodule): its functions only -------------------------------------------------
+set(CLAP_WRAPPER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/clap-wrapper")
+if(NOT EXISTS "${CLAP_WRAPPER_DIR}/CMakeLists.txt")
+  message(FATAL_ERROR "no ${CLAP_WRAPPER_DIR} (git submodule update --init)")
+endif()
 set(CLAP_WRAPPER_DONT_ADD_TARGETS TRUE)
 set(CLAP_WRAPPER_DOWNLOAD_DEPENDENCIES FALSE)
-add_subdirectory(deps/clap-wrapper-0.17.0 clap-wrapper)
+add_subdirectory("${CLAP_WRAPPER_DIR}" clap-wrapper)
 
 # --- the editor (src/editor): the awva app's screen drawn natively, its design tokens generated from
 # app/design/tokens.json (include/awva_plugin/design_tokens.h); the font and the logo compiled in -------
@@ -76,7 +81,7 @@ endif()
 # --- the generic plugin: CLAP and nsc.h only, compiled once --------------------------------------------
 add_library(awva_plugin_core OBJECT src/plugin.cpp ${AWVA_EDITOR_SOURCES})
 target_include_directories(awva_plugin_core PUBLIC "${CLAP_SDK_ROOT}/include" "${AWVA_DIR}/component/include" include src
-  deps/clap-wrapper-0.17.0/include) # (clapwrapper/auv2.h: the AU codes)
+  "${CLAP_WRAPPER_DIR}/include") # (clapwrapper/auv2.h: the AU codes; clapwrapper/vst3.h)
 target_compile_options(awva_plugin_core PRIVATE -Wall -Wextra -ffp-contract=off)
 target_compile_definitions(awva_plugin_core PRIVATE $<$<PLATFORM_ID:Windows>:_CRT_SECURE_NO_WARNINGS>)
 
@@ -111,7 +116,7 @@ foreach(v IN LISTS AWVA_PLUGIN_ENGINES)
   add_library(awva_${v}_clap MODULE src/clap_module.cpp)
   target_link_libraries(awva_${v}_clap PRIVATE awva_${v}_impl)
   if(APPLE)
-    set_target_properties(awva_${v}_clap PROPERTIES OUTPUT_NAME awva_${v} LIBRARY_OUTPUT_NAME awva_${v} BUNDLE TRUE BUNDLE_EXTENSION clap
+    set_target_properties(awva_${v}_clap PROPERTIES OUTPUT_NAME awva_${v} BUNDLE TRUE BUNDLE_EXTENSION clap
       MACOSX_BUNDLE_GUI_IDENTIFIER com.sorbet-ai.awva.${v} MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
       MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION})
     target_link_options(awva_${v}_clap PRIVATE -Wl,-exported_symbol,_clap_entry)
@@ -122,13 +127,8 @@ foreach(v IN LISTS AWVA_PLUGIN_ENGINES)
   # the VST3 and the AUv2: clap-wrapper around the same implementation, linked in
   add_library(awva_${v}_vst3 MODULE src/clap_module.cpp)
   target_link_libraries(awva_${v}_vst3 PRIVATE awva_${v}_impl)
-  # (Windows: the VST3 folder bundle, awva_<engine>.vst3/Contents/x86_64-win/, in the build directory;
-  # clap-wrapper 0.17.0 reads ASSET_OUTPUT_DIRECTORY wrongly on macOS, where the bundle lands there anyway)
-  set(_v3dir "")
-  if(WIN32)
-    set(_v3dir ASSET_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
-  endif()
-  target_add_vst3_wrapper(TARGET awva_${v}_vst3 OUTPUT_NAME "awva_${v}" ${_v3dir}
+  # (in the build directory; on Windows the VST3 folder bundle, awva_<engine>.vst3/Contents/x86_64-win/)
+  target_add_vst3_wrapper(TARGET awva_${v}_vst3 OUTPUT_NAME "awva_${v}" ASSET_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
     SUPPORTS_ALL_NOTE_EXPRESSIONS TRUE BUNDLE_IDENTIFIER com.sorbet-ai.awva.${v}.vst3 BUNDLE_VERSION ${PROJECT_VERSION})
   list(APPEND AWVA_PLUGIN_BUNDLES awva_${v}_clap awva_${v}_vst3)
   if(APPLE)
@@ -136,8 +136,8 @@ foreach(v IN LISTS AWVA_PLUGIN_ENGINES)
     target_link_libraries(awva_${v}_auv2 PRIVATE awva_${v}_impl)
     # its description from the built CLAP (the AU's name, description and version are the CLAP
     # descriptor's, so the component's; the codes from plugin.cpp's AU info factory); its bundle
-    # awva_<engine>.component, the CLAP's LIBRARY_OUTPUT_NAME
-    target_add_auv2_wrapper(TARGET awva_${v}_auv2 CLAP_TARGET_FOR_CONFIG awva_${v}_clap
+    # awva_<engine>.component
+    target_add_auv2_wrapper(TARGET awva_${v}_auv2 OUTPUT_NAME "awva_${v}" CLAP_TARGET_FOR_CONFIG awva_${v}_clap
       BUNDLE_IDENTIFIER com.sorbet-ai.awva.${v}.component BUNDLE_VERSION ${PROJECT_VERSION}
       MANUFACTURER_NAME "Sorbet AI" MANUFACTURER_CODE Awva)
     list(APPEND _au_targets awva_${v}_auv2)
@@ -252,7 +252,7 @@ endif()
 # clap-wrapper's own libraries are C++17 code (char8_t paths and its fmt break under C++20): every
 # target it made in this directory and its own
 get_directory_property(_here BUILDSYSTEM_TARGETS)
-get_directory_property(_wrap DIRECTORY deps/clap-wrapper-0.17.0 BUILDSYSTEM_TARGETS)
+get_directory_property(_wrap DIRECTORY "${CLAP_WRAPPER_DIR}" BUILDSYSTEM_TARGETS)
 foreach(_t IN LISTS _here _wrap)
   if(_t MATCHES "clap-wrapper|base-sdk|build-helper|_auv2|_vst3$|filesystem|^sdk_|^pluginterfaces|^base$|^vst3")
     set_target_properties(${_t} PROPERTIES CXX_STANDARD 17)
@@ -260,19 +260,21 @@ foreach(_t IN LISTS _here _wrap)
 endforeach()
 
 # macOS: the bundles signed ad hoc as a whole (the linker signs only the binary; the AU registrar
-# skips a component whose resources aren't sealed). An AU's Info.plist is clap-wrapper's, copied in
-# after its link, but CMake writes a bundle's Info.plist again at every configure: so the copy and
-# the signature are made at every build (awva_au_plists), not only after a link.
+# skips a component whose resources aren't sealed). An AU is signed after clap-wrapper's
+# <target>-info-plist has put its Info.plist in (again after a re-configure), whenever that or the
+# binary changed.
 if(APPLE)
   foreach(_b IN LISTS AWVA_PLUGIN_BUNDLES)
     add_custom_command(TARGET ${_b} POST_BUILD COMMAND codesign --force --deep --sign - "$<TARGET_BUNDLE_DIR:${_b}>" VERBATIM)
   endforeach()
-  set(_cmds "")
   foreach(_b IN LISTS _au_targets)
-    list(APPEND _cmds COMMAND "${CMAKE_COMMAND}" -E copy "${CMAKE_CURRENT_BINARY_DIR}/${_b}-build-helper-output/auv2_Info.plist"
-      "$<TARGET_BUNDLE_DIR:${_b}>/Contents/Info.plist"
-      COMMAND codesign --force --deep --sign - "$<TARGET_BUNDLE_DIR:${_b}>")
+    set(_signed "${CMAKE_CURRENT_BINARY_DIR}/${_b}.signed")
+    add_custom_command(OUTPUT "${_signed}"
+      COMMAND codesign --force --deep --sign - "$<TARGET_BUNDLE_DIR:${_b}>"
+      COMMAND "${CMAKE_COMMAND}" -E touch "${_signed}"
+      DEPENDS "$<TARGET_FILE:${_b}>" "${CMAKE_CURRENT_BINARY_DIR}/${_b}-build-helper-output/auv2_Info.plist.copied" VERBATIM)
+    add_custom_target(${_b}_signed ALL DEPENDS "${_signed}")
+    add_dependencies(${_b}_signed ${_b}-info-plist)
+    add_dependencies(awva_plugins ${_b}_signed)
   endforeach()
-  add_custom_target(awva_au_plists ALL ${_cmds} DEPENDS ${_au_targets} VERBATIM)
-  add_dependencies(awva_plugins awva_au_plists)
 endif()

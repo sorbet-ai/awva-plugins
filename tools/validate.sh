@@ -4,13 +4,8 @@
 #
 # The validators on every built plugin, on this machine (Windows in Git Bash, or macOS), from
 # ./fetch_deps.sh --validators:
-#   clap-validator 0.4.1 on the .clap, every test but these known artefacts of the validator:
-#     preset-discovery-crawl, -load   deadlock inside clap-validator 0.4.1 itself (begin_preset holds
-#                                     its result mutex and flush_preset() locks it again)
-#     process-varying-sample-rates    activates at 1 kHz to 768 kHz and fails on the first refusal: the
-#                                     plugins run the engines' rates only (nsc_desc min_rate .. max_rate,
-#                                     11.025 to 192 kHz; activate() refuses others, as CLAP allows); the
-#                                     info proof checks that range
+#   clap-validator       every test, on the .clap (Sorbet AI's fork of 0.4.1, built from the submodule
+#                        third_party/clap-validator: docs/forked_dependencies.md)
 #   pluginval 1.0.4      --strictness-level 10 --skip-gui-tests on the .vst3
 #   auval -strict        on the .component (macOS: tests/auval_mac.sh, the component installed for
 #                        the run only)
@@ -24,12 +19,12 @@ V="$B/validate"
 mkdir -p "$V"
 case "$(uname -s)" in
 Darwin)
-  CV="$(find "$HERE"/deps/clap-validator-0.4.1-macos -type f -name clap-validator -perm -u+x | head -n 1)"
+  CV="$HERE/deps/clap-validator/release/clap-validator"
   PV="$(find "$HERE"/deps/pluginval-1.0.4-macos -type f -path '*/Contents/MacOS/pluginval' | head -n 1)"
   mac=1
   ;;
 *)
-  CV="$(find "$HERE"/deps/clap-validator-0.4.1-windows -type f -name clap-validator.exe | head -n 1)"
+  CV="$HERE/deps/clap-validator/release/clap-validator.exe"
   PV="$(find "$HERE"/deps/pluginval-1.0.4-windows -type f -name pluginval.exe | head -n 1)"
   mac=0
   ;;
@@ -48,8 +43,7 @@ fi
 
 one() { # engine: the CLAP and VST3 validators, in parallel with the other engines
   e="$1"
-  x='preset-discovery-(crawl|load)|process-varying-sample-rates'
-  "$CV" validate -x "$x" "$B/awva_$e.clap" > "$V/${e}_clap-validator.log" 2>&1
+  "$CV" validate "$B/awva_$e.clap" > "$V/${e}_clap-validator.log" 2>&1
   echo "rc=$?" >> "$V/${e}_clap-validator.log"
   "$PV" --strictness-level 10 --skip-gui-tests --timeout-ms 300000 --validate "$B/awva_$e.vst3" > "$V/${e}_pluginval.log" 2>&1
   echo "rc=$?" >> "$V/${e}_pluginval.log"

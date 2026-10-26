@@ -11,7 +11,8 @@ the release archive's licenses/ directory):
   Mineiro, BSD-3-Clause, and the tan0 coefficients of Faust's fast.lib by Piers Titus van der
   Torren, Apache-2.0.
 - The CLAP SDK 1.2.10 (headers), Copyright (c) 2021 Alexandre Bique, MIT.
-- clap-wrapper 0.17.0 (the VST3 and AU binaries), Copyright (c) 2022 defiantnerd, MIT; it
+- clap-wrapper 0.17.0 with Sorbet AI's fixes (github.com/sorbet-ai/clap-wrapper, branch awva; the
+  VST3 and AU binaries), Copyright (c) 2022 defiantnerd, MIT; it
   includes fmt, Copyright (c) 2012 - present Victor Zverovich, MIT, and the PreSonus plugin
   extensions header, placed in the public domain by PreSonus Software Ltd.
 - The VST3 SDK 3.8.0 (the VST3 binaries: its base, pluginterfaces and public.sdk), Copyright (c)
