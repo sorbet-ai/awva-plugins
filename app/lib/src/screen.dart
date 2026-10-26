@@ -480,7 +480,8 @@ class _Footer extends StatelessWidget {
         valueListenable: k.status,
         builder: (_, st, _) {
           final audio = switch (a.state) {
-            'running' => '${a.device} · ${(a.rate / 1000).toStringAsFixed(1)} kHz · ${a.buffer} frames',
+            'running' =>
+              '${a.device}${a.mode == 'exclusive' ? ' (exclusive)' : ''} · ${(a.rate / 1000).toStringAsFixed(1)} kHz · key to sound ${k.latency.totalMs.toStringAsFixed(1)} ms',
             'null' => 'No audio output (--no-audio)',
             'failed' => 'Audio: ${a.message.isEmpty ? 'not running' : a.message}',
             _ => 'Audio off',
@@ -546,12 +547,50 @@ class _Settings extends StatelessWidget {
           Text(a.device.isEmpty ? (a.state == 'null' ? 'None (--no-audio)' : 'No device') : a.device, style: AwvaType.body(c.text1)),
           Text(
             a.state == 'running'
-                ? '${a.backend} · ${a.rate} Hz · ${a.buffer} frames. Follows the system volume.'
+                ? '${a.backend} ${a.mode} · ${a.rate} Hz. ${a.mode == 'exclusive' ? 'The Windows volume is applied by awva (now ${(a.volume * 100).round()}%).' : 'Follows the system volume.'}'
                 : (a.message.isEmpty ? a.backend : a.message),
             style: AwvaType.small(a.state == 'failed' ? c.error : c.text3),
           ),
+          if (a.state == 'running' && a.message.isNotEmpty) Text(a.message, style: AwvaType.small(c.butter)),
+          if (a.exclusiveAvailable) ...[
+            const SizedBox(height: AwvaSize.s2),
+            Row(children: [
+              _Segment(label: 'Shared', selected: a.wanted != 'exclusive', onTap: () => k.setAudioMode('shared')),
+              const SizedBox(width: 4),
+              _Segment(label: 'Exclusive', selected: a.wanted == 'exclusive', onTap: () => k.setAudioMode('exclusive')),
+            ]),
+            if (a.wanted == 'exclusive') ...[
+              const SizedBox(height: AwvaSize.s2),
+              Row(children: [
+                Text('buffer', style: AwvaType.small(c.text3)),
+                const SizedBox(width: AwvaSize.s2),
+                // (0: the device's smallest buffer, the least delay; larger if it crackles)
+                for (final f in const [0, 256, 512]) ...[
+                  _Segment(label: f == 0 ? 'smallest' : '$f', selected: a.frames == f, onTap: () => k.setAudioMode('exclusive', f)),
+                  const SizedBox(width: 4),
+                ],
+              ]),
+            ],
+            if (k.exclusiveNote)
+              Container(
+                margin: const EdgeInsets.only(top: AwvaSize.s2),
+                padding: const EdgeInsets.all(AwvaSize.s3),
+                decoration: BoxDecoration(color: c.butter.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(AwvaSize.radiusSmall)),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(
+                    'Exclusive mode gives awva the output alone: other apps go quiet, and the Windows mixer is bypassed. '
+                    'awva applies the Windows volume itself. Check the level before you play loud.',
+                    style: AwvaType.small(c.text1),
+                  ),
+                  const SizedBox(height: AwvaSize.s2),
+                  AwvaButton(onTap: k.noteExclusiveRead, label: 'Got it'),
+                ]),
+              ),
+          ],
           const SizedBox(height: AwvaSize.s2),
           AwvaButton(onTap: k.restartAudio, icon: Icons.refresh, label: 'Restart audio'),
+          head('delay, key to sound'),
+          _LatencyTable(l: k.latency, mode: a.mode),
           head('midi inputs'),
           if (k.ports.isEmpty) Text('No MIDI inputs. Connect a controller; it shows here.', style: AwvaType.small(c.text3)),
           for (final p in k.ports)
@@ -599,6 +638,36 @@ class _Settings extends StatelessWidget {
         ]),
       ),
     );
+  }
+}
+
+/// the delay chain, each figure with where it comes from
+class _LatencyTable extends StatelessWidget {
+  const _LatencyTable({required this.l, required this.mode});
+  final LatencyInfo l;
+  final String mode;
+  @override
+  Widget build(BuildContext context) {
+    final c = AwvaTheme.of(context);
+    String ms(double v) => '${v.toStringAsFixed(1)} ms';
+    Widget row(String what, String value, String source, {bool strong = false}) => Padding(
+          padding: const EdgeInsets.only(bottom: 2),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(child: Text(what, style: (strong ? AwvaType.bodyStrong : AwvaType.small)(strong ? c.text1 : c.text2))),
+            SizedBox(width: 116, child: Text(value, textAlign: TextAlign.right, style: AwvaType.value(strong ? c.text1 : c.text2))),
+            const SizedBox(width: AwvaSize.s3),
+            SizedBox(width: 62, child: Text(source, style: AwvaType.small(c.text3))),
+          ]),
+        );
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      row('MIDI in to output', l.midiCount > 0 ? '${ms(l.midiMean)} (${l.midiMin.toStringAsFixed(1)}–${l.midiMax.toStringAsFixed(1)})' : 'play a note',
+          l.midiCount > 0 ? 'measured' : ''),
+      row('engine step', 'up to ${ms(l.stepMs)}', 'by design'),
+      row('engine block', '${l.blockFrames} fr · ${ms(l.blockMs)}', 'by design'),
+      row('output buffer', '${l.bufferFrames} fr · ${ms(l.bufferMs)}', 'driver'),
+      row('device latency', l.streamMs >= 0 ? ms(l.streamMs) : 'not reported', 'driver'),
+      row('key to sound', ms(l.totalMs), 'sum', strong: true),
+    ]);
   }
 }
 

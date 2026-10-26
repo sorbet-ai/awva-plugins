@@ -81,6 +81,23 @@ void main() {
     expect(core.calls.where((c) => c == 'rescan'), hasLength(2));
   });
 
+  testWidgets('exclusive output: asked of the core, a note the first time, the buffer chosen', (t) async {
+    final core = await _pump(t, size: const Size(1040, 900));
+    await t.tap(find.bySemanticsLabel('settings'));
+    await t.pumpAndSettle();
+    expect(find.text('key to sound'), findsOneWidget);
+    await t.tap(find.text('Exclusive'));
+    await t.pumpAndSettle();
+    expect(core.calls, contains('audio exclusive -1'));
+    expect(find.textContaining('awva applies the Windows volume itself'), findsOneWidget);
+    await t.tap(find.text('Got it'));
+    await t.pumpAndSettle();
+    expect(find.textContaining('awva applies the Windows volume itself'), findsNothing);
+    expect(core.settings['exclusive_noted'], 'yes');
+    await t.tap(find.text('256'));
+    expect(core.calls, contains('audio exclusive 256'));
+  });
+
   testWidgets('the theme follows the OS, and the choice is kept by the core', (t) async {
     final core = await _pump(t, b: Brightness.dark);
     await t.tap(find.bySemanticsLabel('light or dark'));
@@ -102,7 +119,7 @@ void main() {
         await expectLater(find.byType(AwvaApp), matchesGoldenFile('goldens/params_$name.png'));
       });
       testWidgets('settings, $name', (t) async {
-        await _pump(t, b: b);
+        await _pump(t, b: b, size: const Size(1040, 900));
         await t.tap(find.bySemanticsLabel('settings'));
         await t.pumpAndSettle();
         await expectLater(find.byType(AwvaApp), matchesGoldenFile('goldens/settings_$name.png'));

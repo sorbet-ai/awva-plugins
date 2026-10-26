@@ -49,7 +49,8 @@ void main(List<String> args) {
   if (exitAfter != null) {
     Timer(Duration(milliseconds: (exitAfter * 1000).round()), () {
       final s = core.status();
-      stdout.writeln('awva: ${core.audio().state}, ${s.midiEvents} MIDI messages, ${s.faults} faults');
+      final yours = controller.engines.where((e) => !e.builtin).map((e) => e.label).toList();
+      stdout.writeln('awva: ${core.audio().state}, ${s.midiEvents} MIDI messages, ${s.faults} faults, your engines: $yours');
       controller.dispose();
       core.stop(); // (its threads joined and the probe file finished before the process ends)
       exit(0);

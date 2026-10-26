@@ -18,7 +18,9 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <chrono>
 #include <filesystem>
+#include <thread>
 #include <string>
 #include <vector>
 
@@ -29,6 +31,7 @@
 #include "platform.h"
 #include "player.h"
 #include "nsc/load.h"
+#include "endpoint_gain.h"
 #include "safety.h"
 
 using namespace awva_app;
@@ -256,6 +259,51 @@ void setup_checks(const std::string& builtin) {
 	(void)first;
 }
 
+// exclusive mode's Windows volume (the null sink simulating it) against shared at that volume: a held
+// sine note through the live path, the tapped level (shared: the mixer's volume comes after the tap)
+double held_note_rms(const std::string& builtin, const std::string& scratch, const char* sim_db, const std::string& name) {
+	const std::string wav = join(scratch, name);
+	std::string o = "{\"no_audio\": true, \"midi\": false, \"settings\": \"\", \"builtin_dir\": " + jstr(builtin) + ", \"engines_dir\": " +
+	    jstr(join(scratch, "none")) + ", \"probe_wav\": " + jstr(wav);
+	if (sim_db) o += std::string(", \"simulate_volume_db\": ") + sim_db;
+	o += "}";
+	if (awva_start(o.c_str()) != 0 || awva_select_engine("builtin:sine") != 0) return -1;
+	awva_set_master_db(-6.0f);
+	const uint32_t on[2] = {0x40903c00u, 0xc0000000u}; // (MIDI 2.0 Note On, key 60)
+	awva_ump(on, 2);
+	std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+	awva_stop();
+	std::string d;
+	if (!read_file(wav, &d, 1u << 26) || d.size() < 44 + 8 * 24000) return -1;
+	const float* s = reinterpret_cast<const float*>(d.data() + 44);
+	const size_t frames = (d.size() - 44) / 8;
+	double sq = 0;
+	for (size_t i = frames - 24000; i < frames; i++) sq += static_cast<double>(s[2 * i]) * s[2 * i];
+	return std::sqrt(sq / 24000);
+}
+
+void exclusive_volume_checks(const std::string& builtin, const std::string& scratch) {
+	{
+		EndpointGain g;
+		g.reset(1.0f);
+		g.set(endpoint_gain(-10.0f, 0.4f, false, false, false));
+		std::vector<float> l(256, 1.0f), r(256, 1.0f);
+		g.apply(l.data(), r.data(), 256);
+		const float want = std::pow(10.0f, -10.0f / 20.0f);
+		check(std::fabs(l[255] - want) < 1e-6f && l[0] > want && l[0] < 1.0f, "exclusive volume: a change is ramped over a buffer, to the mixer's gain");
+		check(endpoint_gain(-10.0f, 0.0f, false, false, false) == 0.0f && endpoint_gain(-10.0f, 0.5f, true, false, false) == 0.0f &&
+		          endpoint_gain(-10.0f, 0.5f, true, true, true) == 1.0f,
+		    "exclusive volume: the slider at 0 and mute are silence; a device that does it in hardware is left alone");
+	}
+	const double shared = held_note_rms(builtin, scratch, nullptr, "shared.wav");
+	const double excl = held_note_rms(builtin, scratch, "-10.46", "exclusive.wav");
+	const double diff = 20 * std::log10(excl / shared), want = -10.46;
+	char b[200];
+	std::snprintf(b, sizeof b, "exclusive at -10.46 dB (Windows slider 0.3) measures as shared at that volume: shared %.2f dBFS - 10.46 dB vs exclusive %.2f dBFS (%.3f dB apart)",
+	    20 * std::log10(shared), 20 * std::log10(excl), diff - want);
+	check(shared > 1e-3 && std::fabs(diff - want) < 0.01, b);
+}
+
 void midi1_checks() {
 	const uint8_t b[] = {0x91, 60, 100, 0xd1, 50, 0xf8, 0xe1, 0x00, 0x40, 0xf0, 1, 2, 3, 0xf7, 0xb1, 74, 64};
 	const std::vector<uint32_t> w = midi1_to_ump(b, sizeof b);
@@ -275,6 +323,7 @@ int main(int argc, char** argv) {
 	midi1_checks();
 	package_checks(argv[1], argv[2]);
 	setup_checks(argv[1]);
+	exclusive_volume_checks(argv[1], argv[2]);
 	std::printf("%s\n", failures ? "app_tests: FAILED" : "app_tests: ok");
 	return failures ? 1 : 0;
 }

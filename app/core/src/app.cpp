@@ -9,8 +9,8 @@
 //                at their frames, renders through the Player, and returns retired instances and
 //                texts to the UI thread through another ring (no allocation, no locks)
 //   MIDI threads the OS's: each port's messages into its own ring, timestamped
-// A MIDI message's frame: the buffer's first frame + one buffer + (its time - the buffer's time), so
-// the timing between messages is kept to the frame, one buffer later, whatever the buffer size.
+// A MIDI message plays from the next buffer rendered, at its first frame: the least delay the output
+// allows (under one period from its arrival); the engine takes it at its next 2 ms step.
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -85,6 +85,14 @@ public:
 
 		no_audio_ = o.flag("no_audio", false);
 		audio_ = no_audio_ ? make_null_audio(48000) : make_device_audio();
+		AudioConfig cfg;
+		cfg.exclusive = setting("audio_mode") == "exclusive";
+		cfg.frames = 0; // (exclusive: the device's smallest buffer, unless chosen)
+		if (!setting("exclusive_frames").empty()) cfg.frames = std::max(0, std::atoi(setting("exclusive_frames").c_str()));
+		if (o.has("simulate_volume_db")) cfg.simulate_db = static_cast<float>(o.num("simulate_volume_db", 0));
+		if (no_audio_ && o.has("null_period")) cfg.frames = static_cast<int>(o.num("null_period", 256)); // (the null sink's period, tests)
+		audio_->configure(cfg);
+		config_ = cfg;
 		rate_ = audio_->probe_rate();
 		if (rate_ <= 0) rate_ = 48000;
 		player_.prepare(rate_);
@@ -321,13 +329,51 @@ public:
 		const AudioInfo i = audio_info();
 		static const char* names[] = {"off", "running", "null", "failed"};
 		return "{\"backend\":" + jstr(i.backend) + ",\"device\":" + jstr(i.device) + ",\"state\":" + jstr(names[std::clamp(i.state, 0, 3)]) +
-		    ",\"message\":" + jstr(i.message) + ",\"rate\":" + std::to_string(i.rate) + ",\"buffer\":" + std::to_string(i.buffer) + "}";
+		    ",\"message\":" + jstr(i.message) + ",\"rate\":" + std::to_string(i.rate) + ",\"buffer\":" + std::to_string(i.buffer) +
+		    ",\"mode\":" + jstr(i.mode) + ",\"wanted\":" + jstr(config_.exclusive ? "exclusive" : "shared") + ",\"frames\":" + std::to_string(config_.frames) +
+		    ",\"exclusive_available\":" + (i.exclusive_available ? "true" : "false") + ",\"volume\":" + jnum(i.volume) + "}";
 	}
+	// the output mode: "shared" (the default) or "exclusive" with a buffer of frames; restarts the audio
+	int set_audio_mode(const std::string& mode, int frames) {
+		config_.exclusive = mode == "exclusive";
+		if (frames >= 0) config_.frames = frames == 0 ? 0 : std::clamp(frames, 16, 4096); // (0: the smallest)
+		set_setting("audio_mode", config_.exclusive ? "exclusive" : "shared");
+		set_setting("exclusive_frames", std::to_string(config_.frames));
+		audio_->configure(config_);
+		return restart_audio();
+	}
+
+	// the delay from a key to the speaker, part by part: each figure measured or as the driver reports it
+	std::string latency_json() {
+		const AudioInfo a = audio_info();
+		const int64_t n = lat_n_.exchange(0);
+		const int64_t sum = lat_sum_.exchange(0), mn = lat_min_.exchange(INT64_MAX), mx = lat_max_.exchange(INT64_MIN);
+		if (n > 0) lat_last_ = {n, mn / 1e3, sum / 1e3 / n, mx / 1e3};
+		const double sr = std::max(1, a.rate);
+		const double period_ms = a.period * 1e3 / sr, buffer_ms = a.buffer * 1e3 / sr;
+		const double block_ms = NSC_BLOCK * 1e3 / sr, step_ms = 2.0;
+		// the total: the MIDI message to its frame (measured), the device's buffer and its own latency
+		// (reported); the engine's 2 ms step is inside the measured MIDI figure
+		const double midi = lat_last_.n ? lat_last_.mean : period_ms / 2;
+		const double out = period_ms + std::max(0.0f, a.stream_ms); // (one period queued, in both modes)
+		std::string s = "{\"mode\":" + jstr(a.mode) + ",\"rate\":" + std::to_string(a.rate);
+		s += ",\"period_frames\":" + std::to_string(a.period) + ",\"period_ms\":" + jnum(period_ms);
+		s += ",\"buffer_frames\":" + std::to_string(a.buffer) + ",\"buffer_ms\":" + jnum(buffer_ms) + ",\"buffer_source\":\"reported by the driver\"";
+		s += ",\"queued_frames\":" + std::to_string(a.period) + ",\"queued_ms\":" + jnum(period_ms);
+		s += ",\"stream_ms\":" + jnum(a.stream_ms) + ",\"stream_source\":\"reported by the driver\"";
+		s += ",\"block_frames\":" + std::to_string(NSC_BLOCK) + ",\"block_ms\":" + jnum(block_ms) + ",\"step_ms\":" + jnum(step_ms);
+		s += ",\"midi_count\":" + std::to_string(lat_last_.n) + ",\"midi_min_ms\":" + jnum(lat_last_.min) + ",\"midi_mean_ms\":" + jnum(lat_last_.mean) +
+		    ",\"midi_max_ms\":" + jnum(lat_last_.max) + ",\"midi_source\":\"measured\"";
+		s += ",\"total_ms\":" + jnum(midi + out) + ",\"total_source\":" + jstr(lat_last_.n ? "measured MIDI + reported output" : "reported output + one buffer");
+		s += ",\"volume\":" + jnum(a.volume) + "}";
+		return s;
+	}
+
 	int restart_audio() {
 		stop_audio();
 		apply_all(); // (the audio thread is stopped: the UI thread applies what it hadn't)
 		drain_rets();
-		const int r = audio_->probe_rate();
+		const int r = audio_->probe_rate(); // (exclusive mode may run at another rate than the mixer)
 		if (r > 0 && r != rate_) {
 			if (player_.inst && player_.inst->reinit(r) != 0) return fail("the engine doesn't run at " + std::to_string(r) + " Hz");
 			rate_ = r;
@@ -357,6 +403,11 @@ public:
 	std::string error_;
 
 	// --- the audio thread --------------------------------------------------------------------------
+	// the samples as they go to the device: the probe tap
+	void tap(const float* l, const float* r, uint32_t n) override {
+		if (probe_run_)
+			for (uint32_t i = 0; i < n; i++) (void)probe_.push({l[i], r[i]});
+	}
 	void render(float* l, float* r, uint32_t n, uint64_t host_ns) override {
 		const uint64_t t0 = now_ns();
 		Cmd c;
@@ -367,9 +418,8 @@ public:
 		for (auto& ring : rings_) {
 			MidiEv e;
 			while (k < kBatch && ring.pop(&e)) {
-				const double dt = (static_cast<double>(e.ns) - static_cast<double>(host_ns)) * rate_ / 1e9;
-				const int64_t f = static_cast<int64_t>(base) + n + static_cast<int64_t>(std::floor(dt));
-				batch_[k].f = static_cast<uint64_t>(std::clamp<int64_t>(f, static_cast<int64_t>(base), static_cast<int64_t>(base) + 2 * n));
+				batch_[k].f = base;
+				batch_[k].ns = e.ns;
 				std::memcpy(batch_[k].w, e.w, sizeof e.w);
 				k++;
 			}
@@ -379,6 +429,17 @@ public:
 			const uint64_t f = std::max(batch_[i].f, last_frame_);
 			last_frame_ = f;
 			player_.event(f, batch_[i].w);
+			// measured: from the message's time to its frame's time in this output stream
+			const double at = static_cast<double>(host_ns) + (static_cast<double>(f) - static_cast<double>(base)) * 1e9 / rate_;
+			const int64_t us = static_cast<int64_t>((at - static_cast<double>(batch_[i].ns)) / 1e3);
+			lat_n_.fetch_add(1, std::memory_order_relaxed);
+			lat_sum_.fetch_add(us, std::memory_order_relaxed);
+			int64_t m = lat_min_.load(std::memory_order_relaxed);
+			while (us < m && !lat_min_.compare_exchange_weak(m, us)) {
+			}
+			m = lat_max_.load(std::memory_order_relaxed);
+			while (us > m && !lat_max_.compare_exchange_weak(m, us)) {
+			}
 		}
 		const Safety::Result res = player_.render(l, r, n);
 		atomic_max(peak_l_, res.peak_l);
@@ -387,8 +448,6 @@ public:
 		if (res.fault) faults_.fetch_add(1);
 		stopped_.store(player_.stopped ? 1 : 0);
 		voices_.store(player_.inst ? player_.inst->c.active_voices(player_.inst->state) : 0);
-		if (probe_run_)
-			for (uint32_t i = 0; i < n; i++) (void)probe_.push({l[i], r[i]});
 		const float load = static_cast<float>(static_cast<double>(now_ns() - t0) * rate_ / (1e9 * n));
 		cpu_.store(std::max(load, cpu_.load() * 0.995f));
 		if (last_host_ns_ && host_ns - last_host_ns_ > static_cast<uint64_t>(2.5e9 * n / rate_)) xruns_.fetch_add(1);
@@ -514,6 +573,7 @@ private:
 	std::string builtin_dir_, user_dir_, settings_path_;
 	std::map<std::string, std::string> settings_;
 	bool no_audio_ = false, shut_ = false;
+	AudioConfig config_;
 	std::unique_ptr<AudioOut> audio_, fallback_;
 	std::unique_ptr<MidiIn> midi_;
 	int rate_ = 48000;
@@ -538,9 +598,14 @@ private:
 	// the audio thread's
 	Player player_;
 	struct Batched {
-		uint64_t f;
+		uint64_t f, ns;
 		uint32_t w[4];
 	};
+	std::atomic<int64_t> lat_n_{0}, lat_sum_{0}, lat_min_{INT64_MAX}, lat_max_{INT64_MIN};
+	struct LatWindow {
+		int64_t n = 0;
+		double min = 0, mean = 0, max = 0;
+	} lat_last_;
 	static constexpr int kBatch = 2048;
 	Batched batch_[kBatch];
 	uint64_t last_frame_ = 0, last_host_ns_ = 0;
@@ -753,6 +818,12 @@ AWVA_APP_API const char* awva_audio(void) {
 	return s.c_str();
 }
 AWVA_APP_API int32_t awva_audio_restart(void) { return g_core ? g_core->restart_audio() : -1; }
+AWVA_APP_API int32_t awva_set_audio_mode(const char* mode, int32_t frames) { return g_core && mode ? g_core->set_audio_mode(mode, frames) : -1; }
+AWVA_APP_API const char* awva_latency(void) {
+	static std::string s;
+	s = g_core ? g_core->latency_json() : "{}";
+	return s.c_str();
+}
 AWVA_APP_API const char* awva_setting(const char* key) {
 	static std::string s;
 	s = g_core && key ? g_core->setting(key) : "";

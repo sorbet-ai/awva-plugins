@@ -30,6 +30,10 @@ class Controller extends ChangeNotifier {
   Sound? sound;
   List<MidiPortInfo> ports = [];
   AudioInfo audio = AudioInfo(const {});
+  LatencyInfo latency = LatencyInfo(const {});
+
+  /// the one-time note on exclusive mode, until the user has read it
+  bool exclusiveNote = false;
   String enginesDir = '';
   ThemeChoice theme = ThemeChoice.system;
   String? message; // the last refusal, shown until the next action
@@ -47,6 +51,7 @@ class Controller extends ChangeNotifier {
     sound = core.sound();
     ports = core.midiPorts();
     audio = core.audio();
+    latency = core.latency();
     enginesDir = core.enginesDir();
     status.value = core.status();
     notifyListeners();
@@ -79,6 +84,7 @@ class Controller extends ChangeNotifier {
     core.midiRefresh();
     ports = core.midiPorts();
     audio = core.audio();
+    latency = core.latency();
     notifyListeners();
   }
 
@@ -132,6 +138,21 @@ class Controller extends ChangeNotifier {
   void enablePort(String name, bool on) {
     core.midiEnable(name, on);
     ports = core.midiPorts();
+    notifyListeners();
+  }
+
+  /// shared (the default) or exclusive, with its buffer; the first time exclusive is chosen, a note
+  void setAudioMode(String mode, [int frames = -1]) {
+    if (mode == 'exclusive' && core.setting('exclusive_noted') != 'yes') exclusiveNote = true;
+    message = core.setAudioMode(mode, frames) ? null : core.lastError();
+    audio = core.audio();
+    latency = core.latency();
+    notifyListeners();
+  }
+
+  void noteExclusiveRead() {
+    exclusiveNote = false;
+    core.setSetting('exclusive_noted', 'yes');
     notifyListeners();
   }
 

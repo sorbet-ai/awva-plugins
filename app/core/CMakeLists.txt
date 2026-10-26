@@ -8,7 +8,7 @@
 #                          plugins' ump proof checks the plugins against), beside the core
 #   awva_app_cli           the core without the UI: list, smoke (the null sink), render
 #   ctest -L app           the core's checks, the smoke run, and the app's output against each plugin's
-set(_src src/app.cpp src/catalog.cpp src/platform.cpp src/audio_null.cpp)
+set(_src src/app.cpp src/catalog.cpp src/platform.cpp src/audio_null.cpp src/audio_query.cpp)
 if(WIN32)
   list(APPEND _src src/audio_wasapi.cpp src/midi_winmm.cpp)
 elseif(APPLE)

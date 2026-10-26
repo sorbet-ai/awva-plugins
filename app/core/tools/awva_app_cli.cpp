@@ -50,6 +50,7 @@ std::string options(int argc, char** argv, const std::string& probe) {
 	std::string o = "{\"no_audio\": true, \"midi\": false, \"settings\": \"\"";
 	if (!arg(argc, argv, "--engines").empty()) o += ", \"engines_dir\": " + jstr(arg(argc, argv, "--engines"));
 	if (!arg(argc, argv, "--builtin").empty()) o += ", \"builtin_dir\": " + jstr(arg(argc, argv, "--builtin"));
+	if (!arg(argc, argv, "--period").empty()) o += ", \"null_period\": " + arg(argc, argv, "--period");
 	if (!probe.empty()) o += ", \"probe_wav\": " + jstr(probe);
 	return o + "}";
 }
@@ -78,6 +79,7 @@ int smoke(int argc, char** argv) {
 	awva_status st;
 	awva_status_get(&st);
 	std::printf("smoke: %u MIDI messages, %u xruns, %u faults, cpu %.3f\n", st.midi_events, st.xruns, st.faults, st.cpu);
+	std::printf("smoke: latency %s\n", awva_latency());
 	awva_stop();
 	// the tap: it sounds, and nothing above the ceiling
 	std::string wav;
@@ -200,6 +202,10 @@ int main(int argc, char** argv) {
 	if (mode == "smoke") return smoke(argc, argv);
 	if (mode == "render") return render(argc, argv);
 	if (mode == "check") return check(argc, argv);
+	if (mode == "devices") { // (asks the default output what it offers; opens no stream, plays nothing)
+		std::printf("%s\n", query_output_json().c_str());
+		return 0;
+	}
 	std::fprintf(stderr, "usage: awva_app_cli list|check|smoke|render [options] (see the source's header)\n");
 	return 2;
 }
