@@ -1,0 +1,414 @@
+{
+  "engine": {
+    "key": "builtin:bowed",
+    "label": "built in",
+    "id": "bowed",
+    "title": "Bowed Strings",
+    "version": "da3ad97",
+    "summary": "bowed strings: friction-driven waveguide strings, modal body, section (9 presets)",
+    "builtin": true
+  },
+  "presets": [
+    {
+      "name": "violin",
+      "factory": true
+    },
+    {
+      "name": "viola",
+      "factory": true
+    },
+    {
+      "name": "cello",
+      "factory": true
+    },
+    {
+      "name": "bass",
+      "factory": true
+    },
+    {
+      "name": "section",
+      "factory": true
+    },
+    {
+      "name": "ponticello",
+      "factory": true
+    },
+    {
+      "name": "flautando",
+      "factory": true
+    },
+    {
+      "name": "sordino",
+      "factory": true
+    },
+    {
+      "name": "pizzicato",
+      "factory": true
+    }
+  ],
+  "preset": 2,
+  "heroes": [
+    2,
+    6,
+    5,
+    11,
+    16,
+    10,
+    27,
+    32
+  ],
+  "params": [
+    {
+      "name": "gain",
+      "group": "level",
+      "min": 0,
+      "max": 4,
+      "kind": 0,
+      "def": 1,
+      "value": 1.40999997
+    },
+    {
+      "name": "force_lo",
+      "group": "bow",
+      "min": 0.300000012,
+      "max": 1.60000002,
+      "kind": 0,
+      "def": 0.75,
+      "value": 0.75
+    },
+    {
+      "name": "force_hi",
+      "group": "bow",
+      "min": 0.300000012,
+      "max": 1.60000002,
+      "kind": 0,
+      "def": 0.949999988,
+      "value": 0.949999988
+    },
+    {
+      "name": "force_over",
+      "group": "bow",
+      "min": 0,
+      "max": 2,
+      "kind": 0,
+      "def": 1,
+      "value": 1
+    },
+    {
+      "name": "speed_curve",
+      "group": "bow",
+      "min": 0,
+      "max": 1,
+      "kind": 0,
+      "def": 0.699999988,
+      "value": 0.699999988
+    },
+    {
+      "name": "rosin",
+      "group": "bow",
+      "min": 0,
+      "max": 0.200000003,
+      "kind": 0,
+      "def": 0.00999999978,
+      "value": 0.00999999978
+    },
+    {
+      "name": "pos",
+      "group": "position",
+      "min": 0.0500000007,
+      "max": 0.200000003,
+      "kind": 0,
+      "def": 0.109999999,
+      "value": 0.109999999
+    },
+    {
+      "name": "pos_tilt",
+      "group": "position",
+      "min": 0,
+      "max": 1.5,
+      "kind": 0,
+      "def": 1,
+      "value": 1
+    },
+    {
+      "name": "pos_press",
+      "group": "position",
+      "min": 0,
+      "max": 1,
+      "kind": 0,
+      "def": 0.5,
+      "value": 0.5
+    },
+    {
+      "name": "tilt_dead",
+      "group": "position",
+      "min": 0,
+      "max": 0.800000012,
+      "kind": 0,
+      "def": 0.349999994,
+      "value": 0.349999994
+    },
+    {
+      "name": "damp",
+      "group": "string",
+      "min": 0.5,
+      "max": 10,
+      "kind": 0,
+      "def": 4,
+      "value": 5
+    },
+    {
+      "name": "bright",
+      "group": "string",
+      "min": 0.300000012,
+      "max": 3,
+      "kind": 0,
+      "def": 1,
+      "value": 0.800000012
+    },
+    {
+      "name": "tone_lo",
+      "group": "string",
+      "min": 0,
+      "max": 3,
+      "kind": 0,
+      "def": 0.300000012,
+      "value": 0.300000012
+    },
+    {
+      "name": "tone_hi",
+      "group": "string",
+      "min": 0,
+      "max": 3,
+      "kind": 0,
+      "def": 1.20000005,
+      "value": 1
+    },
+    {
+      "name": "body_size",
+      "group": "body",
+      "min": 0.200000003,
+      "max": 1.5,
+      "kind": 0,
+      "def": 1,
+      "value": 0.449999988
+    },
+    {
+      "name": "body_track",
+      "group": "body",
+      "min": 0,
+      "max": 1,
+      "kind": 0,
+      "def": 0,
+      "value": 0
+    },
+    {
+      "name": "body_amt",
+      "group": "body",
+      "min": 0,
+      "max": 2,
+      "kind": 0,
+      "def": 1,
+      "value": 1.10000002
+    },
+    {
+      "name": "body_q",
+      "group": "body",
+      "min": 0.300000012,
+      "max": 3,
+      "kind": 0,
+      "def": 1,
+      "value": 1
+    },
+    {
+      "name": "hill",
+      "group": "body",
+      "min": 0,
+      "max": 3,
+      "kind": 0,
+      "def": 0.75,
+      "value": 0.600000024
+    },
+    {
+      "name": "direct",
+      "group": "body",
+      "min": 0,
+      "max": 2,
+      "kind": 0,
+      "def": 0.300000012,
+      "value": 0.25
+    },
+    {
+      "name": "acc_force",
+      "group": "accent",
+      "min": 0,
+      "max": 3,
+      "kind": 0,
+      "def": 0,
+      "value": 0
+    },
+    {
+      "name": "acc_time",
+      "group": "accent",
+      "min": 0.00200000009,
+      "max": 0.200000003,
+      "kind": 0,
+      "def": 0.0199999996,
+      "value": 0.0199999996
+    },
+    {
+      "name": "acc_noise",
+      "group": "accent",
+      "min": 0,
+      "max": 1,
+      "kind": 0,
+      "def": 0.0399999991,
+      "value": 0.0399999991
+    },
+    {
+      "name": "acc_bright",
+      "group": "accent",
+      "min": 0,
+      "max": 2,
+      "kind": 0,
+      "def": 0.400000006,
+      "value": 0.400000006
+    },
+    {
+      "name": "rel",
+      "group": "release",
+      "min": 0.0199999996,
+      "max": 3,
+      "kind": 0,
+      "def": 0.100000001,
+      "value": 0.100000001
+    },
+    {
+      "name": "rel_ped",
+      "group": "release",
+      "min": 0,
+      "max": 10,
+      "kind": 0,
+      "def": 3,
+      "value": 3
+    },
+    {
+      "name": "rel_lift",
+      "group": "release",
+      "min": 0,
+      "max": 20,
+      "kind": 0,
+      "def": 0,
+      "value": 0
+    },
+    {
+      "name": "vibrato",
+      "group": "mod",
+      "min": 0,
+      "max": 60,
+      "kind": 0,
+      "def": 0,
+      "value": 0
+    },
+    {
+      "name": "vib_hz",
+      "group": "mod",
+      "min": 2,
+      "max": 9,
+      "kind": 0,
+      "def": 5.5,
+      "value": 5.5
+    },
+    {
+      "name": "vib_delay",
+      "group": "mod",
+      "min": 0,
+      "max": 2,
+      "kind": 0,
+      "def": 0.349999994,
+      "value": 0.349999994
+    },
+    {
+      "name": "tremolo",
+      "group": "mod",
+      "min": 0,
+      "max": 2,
+      "kind": 0,
+      "def": 1.29999995,
+      "value": 1.29999995
+    },
+    {
+      "name": "body_rot",
+      "group": "mod",
+      "min": -2,
+      "max": 2,
+      "kind": 0,
+      "def": 0.699999988,
+      "value": 0.699999988
+    },
+    {
+      "name": "ensemble",
+      "group": "section",
+      "min": 0,
+      "max": 1.5,
+      "kind": 0,
+      "def": 0,
+      "value": 0
+    },
+    {
+      "name": "ens_detune",
+      "group": "section",
+      "min": 0,
+      "max": 25,
+      "kind": 0,
+      "def": 7,
+      "value": 7
+    },
+    {
+      "name": "ens_spread",
+      "group": "section",
+      "min": 2,
+      "max": 25,
+      "kind": 0,
+      "def": 18,
+      "value": 18
+    },
+    {
+      "name": "pizz",
+      "group": "pizz",
+      "min": 0,
+      "max": 1,
+      "kind": 2,
+      "def": 0,
+      "value": 0
+    },
+    {
+      "name": "pizz_decay",
+      "group": "pizz",
+      "min": 0.100000001,
+      "max": 5,
+      "kind": 0,
+      "def": 1,
+      "value": 1
+    },
+    {
+      "name": "pizz_bright",
+      "group": "pizz",
+      "min": 0.200000003,
+      "max": 5,
+      "kind": 0,
+      "def": 1,
+      "value": 1
+    },
+    {
+      "name": "output",
+      "group": "output",
+      "min": 0,
+      "max": 2,
+      "kind": 0,
+      "def": 1,
+      "value": 1
+    }
+  ],
+  "legato": false
+}

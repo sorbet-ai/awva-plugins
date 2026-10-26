@@ -1,0 +1,563 @@
+{
+  "engine": {
+    "key": "builtin:va",
+    "label": "built in",
+    "id": "va",
+    "title": "Virtual Analog",
+    "version": "da3ad97",
+    "summary": "virtual analog: saw/pulse/sub oscillators, sync, ladder-style filter, envelopes (8 presets)",
+    "builtin": true
+  },
+  "presets": [
+    {
+      "name": "classic",
+      "factory": true
+    },
+    {
+      "name": "pad",
+      "factory": true
+    },
+    {
+      "name": "lead",
+      "factory": true
+    },
+    {
+      "name": "bass",
+      "factory": true
+    },
+    {
+      "name": "brass",
+      "factory": true
+    },
+    {
+      "name": "keys",
+      "factory": true
+    },
+    {
+      "name": "acid",
+      "factory": true
+    },
+    {
+      "name": "strings",
+      "factory": true
+    }
+  ],
+  "preset": 1,
+  "heroes": [
+    15,
+    17,
+    5,
+    32,
+    49,
+    20,
+    37,
+    53
+  ],
+  "params": [
+    {
+      "name": "gain",
+      "group": "level",
+      "min": 0.5,
+      "max": 5,
+      "kind": 0,
+      "def": 2.29999995,
+      "value": 3.5999999
+    },
+    {
+      "name": "pres_lin",
+      "group": "level",
+      "min": 0,
+      "max": 1,
+      "kind": 0,
+      "def": 0.300000012,
+      "value": 0.449999988
+    },
+    {
+      "name": "pres_sq",
+      "group": "level",
+      "min": 0,
+      "max": 1.5,
+      "kind": 0,
+      "def": 0.699999988,
+      "value": 0.550000012
+    },
+    {
+      "name": "pres_hz",
+      "group": "level",
+      "min": 1,
+      "max": 200,
+      "kind": 0,
+      "def": 70,
+      "value": 3
+    },
+    {
+      "name": "hold_decay",
+      "group": "level",
+      "min": 0.00499999989,
+      "max": 1,
+      "kind": 0,
+      "def": 0.0450000018,
+      "value": 0.349999994
+    },
+    {
+      "name": "release",
+      "group": "release",
+      "min": 0.0199999996,
+      "max": 4,
+      "kind": 0,
+      "def": 0.100000001,
+      "value": 0.899999976
+    },
+    {
+      "name": "rel_pedal",
+      "group": "release",
+      "min": 0,
+      "max": 6,
+      "kind": 0,
+      "def": 2.9000001,
+      "value": 3.5
+    },
+    {
+      "name": "rel_speed",
+      "group": "release",
+      "min": 0,
+      "max": 8,
+      "kind": 0,
+      "def": 3,
+      "value": 1
+    },
+    {
+      "name": "acc_level",
+      "group": "accent",
+      "min": 0,
+      "max": 2.5,
+      "kind": 0,
+      "def": 0.75,
+      "value": 0.119999997
+    },
+    {
+      "name": "acc_decay",
+      "group": "accent",
+      "min": 0.00499999989,
+      "max": 0.400000006,
+      "kind": 0,
+      "def": 0.0399999991,
+      "value": 0.0799999982
+    },
+    {
+      "name": "acc_key",
+      "group": "accent",
+      "min": 0,
+      "max": 0.0599999987,
+      "kind": 0,
+      "def": 0.027777778,
+      "value": 0.027777778
+    },
+    {
+      "name": "acc_cutoff",
+      "group": "accent",
+      "min": 0,
+      "max": 48,
+      "kind": 0,
+      "def": 28,
+      "value": 8
+    },
+    {
+      "name": "acc_drive",
+      "group": "accent",
+      "min": 0,
+      "max": 2,
+      "kind": 0,
+      "def": 0.699999988,
+      "value": 0.200000003
+    },
+    {
+      "name": "acc_sync",
+      "group": "accent",
+      "min": 0,
+      "max": 24,
+      "kind": 0,
+      "def": 10,
+      "value": 10
+    },
+    {
+      "name": "acc_pitch",
+      "group": "accent",
+      "min": -1,
+      "max": 1,
+      "kind": 0,
+      "def": 0,
+      "value": 0
+    },
+    {
+      "name": "cut_base",
+      "group": "filter",
+      "min": -20,
+      "max": 80,
+      "kind": 0,
+      "def": 26,
+      "value": 40
+    },
+    {
+      "name": "cut_key",
+      "group": "filter",
+      "min": 0,
+      "max": 1.20000005,
+      "kind": 0,
+      "def": 0.75,
+      "value": 0.600000024
+    },
+    {
+      "name": "cut_env",
+      "group": "filter",
+      "min": 0,
+      "max": 80,
+      "kind": 0,
+      "def": 46,
+      "value": 34
+    },
+    {
+      "name": "cut_back",
+      "group": "filter",
+      "min": -24,
+      "max": 24,
+      "kind": 0,
+      "def": 9,
+      "value": 6
+    },
+    {
+      "name": "cut_fwd",
+      "group": "filter",
+      "min": -24,
+      "max": 24,
+      "kind": 0,
+      "def": 5,
+      "value": 8
+    },
+    {
+      "name": "res",
+      "group": "filter",
+      "min": 0,
+      "max": 0.980000019,
+      "kind": 0,
+      "def": 0.200000003,
+      "value": 0.119999997
+    },
+    {
+      "name": "res_back",
+      "group": "filter",
+      "min": -0.5,
+      "max": 0.980000019,
+      "kind": 0,
+      "def": 0.720000029,
+      "value": 0.449999988
+    },
+    {
+      "name": "res_fwd",
+      "group": "filter",
+      "min": -0.5,
+      "max": 0.980000019,
+      "kind": 0,
+      "def": 0.0799999982,
+      "value": 0.0500000007
+    },
+    {
+      "name": "bass_comp",
+      "group": "filter",
+      "min": 0,
+      "max": 1,
+      "kind": 0,
+      "def": 0.449999988,
+      "value": 0.449999988
+    },
+    {
+      "name": "drive",
+      "group": "filter",
+      "min": 0.100000001,
+      "max": 3,
+      "kind": 0,
+      "def": 0.600000024,
+      "value": 0.449999988
+    },
+    {
+      "name": "drive_env",
+      "group": "filter",
+      "min": 0,
+      "max": 3,
+      "kind": 0,
+      "def": 0.899999976,
+      "value": 0.5
+    },
+    {
+      "name": "saw",
+      "group": "osc",
+      "min": 0,
+      "max": 1,
+      "kind": 0,
+      "def": 0.5,
+      "value": 0.319999993
+    },
+    {
+      "name": "saw_back",
+      "group": "osc",
+      "min": 0,
+      "max": 1,
+      "kind": 0,
+      "def": 0.75,
+      "value": 0.5
+    },
+    {
+      "name": "saw_fwd",
+      "group": "osc",
+      "min": 0,
+      "max": 1,
+      "kind": 0,
+      "def": 0.649999976,
+      "value": 0.300000012
+    },
+    {
+      "name": "saw2",
+      "group": "osc",
+      "min": 0,
+      "max": 1,
+      "kind": 0,
+      "def": 0.360000014,
+      "value": 0.300000012
+    },
+    {
+      "name": "saw2_back",
+      "group": "osc",
+      "min": 0,
+      "max": 1,
+      "kind": 0,
+      "def": 0.5,
+      "value": 0.300000012
+    },
+    {
+      "name": "saw2_fwd",
+      "group": "osc",
+      "min": 0,
+      "max": 1,
+      "kind": 0,
+      "def": 0.600000024,
+      "value": 0.300000012
+    },
+    {
+      "name": "saw2_detune",
+      "group": "osc",
+      "min": -0.5,
+      "max": 0.5,
+      "kind": 0,
+      "def": 0.0700000003,
+      "value": 0.109999999
+    },
+    {
+      "name": "pulse",
+      "group": "osc",
+      "min": 0,
+      "max": 1,
+      "kind": 0,
+      "def": 0,
+      "value": 0.119999997
+    },
+    {
+      "name": "pulse_back",
+      "group": "osc",
+      "min": 0,
+      "max": 1,
+      "kind": 0,
+      "def": 0.449999988,
+      "value": 0.300000012
+    },
+    {
+      "name": "pwm",
+      "group": "osc",
+      "min": 0,
+      "max": 0.400000006,
+      "kind": 0,
+      "def": 0.129999995,
+      "value": 0.200000003
+    },
+    {
+      "name": "pwm_hz",
+      "group": "osc",
+      "min": 0.0500000007,
+      "max": 8,
+      "kind": 0,
+      "def": 0.370000005,
+      "value": 0.5
+    },
+    {
+      "name": "sub",
+      "group": "osc",
+      "min": 0,
+      "max": 1,
+      "kind": 0,
+      "def": 0.5,
+      "value": 0.5
+    },
+    {
+      "name": "sub_base",
+      "group": "osc",
+      "min": 0,
+      "max": 1,
+      "kind": 0,
+      "def": 0.200000003,
+      "value": 0.100000001
+    },
+    {
+      "name": "sub_back",
+      "group": "osc",
+      "min": 0,
+      "max": 1,
+      "kind": 0,
+      "def": 0.25,
+      "value": 0.25
+    },
+    {
+      "name": "sub_fwd",
+      "group": "osc",
+      "min": 0,
+      "max": 1,
+      "kind": 0,
+      "def": 0.600000024,
+      "value": 0.5
+    },
+    {
+      "name": "b_sync",
+      "group": "osc",
+      "min": 0,
+      "max": 1,
+      "kind": 2,
+      "def": 1,
+      "value": 0
+    },
+    {
+      "name": "b_level",
+      "group": "osc",
+      "min": 0,
+      "max": 1,
+      "kind": 0,
+      "def": 0,
+      "value": 0.280000001
+    },
+    {
+      "name": "b_fwd",
+      "group": "osc",
+      "min": 0,
+      "max": 1,
+      "kind": 0,
+      "def": 0.5,
+      "value": 0.100000001
+    },
+    {
+      "name": "b_detune",
+      "group": "osc",
+      "min": -0.5,
+      "max": 0.5,
+      "kind": 0,
+      "def": 0,
+      "value": 0.100000001
+    },
+    {
+      "name": "sync",
+      "group": "osc",
+      "min": 0,
+      "max": 24,
+      "kind": 0,
+      "def": 5,
+      "value": 5
+    },
+    {
+      "name": "sync_fwd",
+      "group": "osc",
+      "min": 0,
+      "max": 24,
+      "kind": 0,
+      "def": 12,
+      "value": 12
+    },
+    {
+      "name": "sync_env",
+      "group": "osc",
+      "min": 0,
+      "max": 24,
+      "kind": 0,
+      "def": 9,
+      "value": 9
+    },
+    {
+      "name": "tilt_home",
+      "group": "osc",
+      "min": -1,
+      "max": 1,
+      "kind": 0,
+      "def": 0,
+      "value": 0
+    },
+    {
+      "name": "drift",
+      "group": "mod",
+      "min": 0,
+      "max": 0.300000012,
+      "kind": 0,
+      "def": 0.0299999993,
+      "value": 0.0500000007
+    },
+    {
+      "name": "saw2_drift",
+      "group": "mod",
+      "min": 0,
+      "max": 0.300000012,
+      "kind": 0,
+      "def": 0.0250000004,
+      "value": 0.0399999991
+    },
+    {
+      "name": "cut_drift",
+      "group": "mod",
+      "min": 0,
+      "max": 2,
+      "kind": 0,
+      "def": 0.300000012,
+      "value": 0.300000012
+    },
+    {
+      "name": "gyro_chorus",
+      "group": "mod",
+      "min": 0,
+      "max": 1,
+      "kind": 0,
+      "def": 0.219999999,
+      "value": 0.349999994
+    },
+    {
+      "name": "vibrato",
+      "group": "mod",
+      "min": 0,
+      "max": 1.5,
+      "kind": 0,
+      "def": 0.349999994,
+      "value": 0.25
+    },
+    {
+      "name": "vib_hz",
+      "group": "mod",
+      "min": 1,
+      "max": 9,
+      "kind": 0,
+      "def": 5.30000019,
+      "value": 4.5999999
+    },
+    {
+      "name": "output",
+      "group": "output",
+      "min": 0,
+      "max": 2,
+      "kind": 0,
+      "def": 1,
+      "value": 1
+    }
+  ],
+  "legato": false
+}

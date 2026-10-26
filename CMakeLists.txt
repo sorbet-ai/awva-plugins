@@ -194,6 +194,12 @@ foreach(v IN LISTS AWVA_PLUGIN_ENGINES)
   set_tests_properties(plugin.${v}.info plugin.${v}.perf plugin.${v}.ump plugin.${v}.notes plugin.${v}.many plugin.${v}.midi plugin.${v}.vst3_presets PROPERTIES LABELS plugin)
 endforeach()
 
+# --- the standalone app's core (app/core: the Flutter app's engine, MIDI and audio) -----------------------
+option(AWVA_APP "build the standalone app's core (app/core)" ON)
+if(AWVA_APP)
+  add_subdirectory(app/core)
+endif()
+
 # clap-wrapper's own libraries are C++17 code (char8_t paths and its fmt break under C++20): every
 # target it made in this directory and its own
 get_directory_property(_here BUILDSYSTEM_TARGETS)

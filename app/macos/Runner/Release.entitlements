@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- not sandboxed: the app reads the user's engine packages from ~/Library/Application Support/awva/engines -->
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+	<!-- the packages' engine libraries are the user's own builds, not signed by the app's team -->
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+	
+</dict>
+</plist>
