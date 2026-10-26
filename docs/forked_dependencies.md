@@ -4,16 +4,16 @@ Two dependencies are Sorbet AI's forks, with fixes for bugs found while building
 
 | dependency | fork | upstream base | pinned commit |
 |---|---|---|---|
-| clap-wrapper | [sorbet-ai/clap-wrapper](https://github.com/sorbet-ai/clap-wrapper/tree/awva) | 0.17.0 (`806bba0`) | [`08b7974`](https://github.com/sorbet-ai/clap-wrapper/commit/08b79746aa090e48ff6991dbf7f3416ffeea2542) |
+| clap-wrapper | [sorbet-ai/clap-wrapper](https://github.com/sorbet-ai/clap-wrapper/tree/awva) | 0.17.0 (`806bba0`) | [`1dd4219`](https://github.com/sorbet-ai/clap-wrapper/commit/1dd42194a7a1581702d5b5b374b2415599de6f3a) |
 | clap-validator | [sorbet-ai/clap-validator](https://github.com/sorbet-ai/clap-validator/tree/awva) | 0.4.1 (`152b982`) | [`6d72c15`](https://github.com/sorbet-ai/clap-validator/commit/6d72c15564eaf4de253f6b33337059f77358a08d) |
 
 ## clap-wrapper
 
-All in [`5a8ac81`](https://github.com/sorbet-ai/clap-wrapper/commit/5a8ac813c73114acd02115d6671b1b440b6ca7de). `tests/wrapper-regressions` checks them (`ctest -R wrapper-regressions`): it passes on macOS and on Windows. With upstream's code it fails at the configure (the AU's name), and with upstream's sources alone, at the preset name. The Cocoa view check passes either way, because through `AudioUnitGetProperty` the AU SDK asks `GetPropertyInfo` first.
+In [`5a8ac81`](https://github.com/sorbet-ai/clap-wrapper/commit/5a8ac813c73114acd02115d6671b1b440b6ca7de) and [`1dd4219`](https://github.com/sorbet-ai/clap-wrapper/commit/1dd42194a7a1581702d5b5b374b2415599de6f3a). `tests/wrapper-regressions` checks them (`ctest -R wrapper-regressions`): it passes on macOS and on Windows. With upstream's code it fails at the configure (the AU's name), and with upstream's sources alone, at the preset name. The Cocoa view check passes either way, because through `AudioUnitGetProperty` the AU SDK asks `GetPropertyInfo` first.
 
 - **VST3 `ASSET_OUTPUT_DIRECTORY`:** the option was ignored on macOS and for a single-file Windows VST3. The code set the property on `VST3_TARGET`, which is unset, instead of `V3_TARGET`. The plugins now use it on every platform.
 - **The AUv2's name with `CLAP_TARGET_FOR_CONFIG`:** `OUTPUT_NAME` was ignored, and the name was always the CLAP target's `LIBRARY_OUTPUT_NAME`. When that was unset, the configure step failed in `MAKE_C_IDENTIFIER`. Now `OUTPUT_NAME` is used when given, else the CLAP target's output name.
-- **The AUv2's Info.plist after a re-configure:** with Ninja and Makefiles, CMake writes the bundle's generic plist again at every configure, and the AU's own plist was copied in only when the target linked. A re-configure therefore left a component that wasn't an AU. Now `<target>-info-plist` copies it in whenever either plist changes. The plugins sign each AU after that target.
+- **The AUv2's Info.plist after a re-configure:** with Ninja and Makefiles, CMake writes the bundle's generic plist again at every configure, and the AU's own plist was copied in only when the target linked. A re-configure therefore left a component that wasn't an AU. Now `<target>-info-plist` copies it in whenever either plist changes. It follows the target without depending on the binary's file, so signing the bundle afterwards doesn't make it run again. The plugins sign each AU after that target.
 - **No Cocoa view without a gui:** `GetProperty(kAudioUnitProperty_CocoaUI)` returned a view for a plugin that has no gui extension, although `GetPropertyInfo` already refused one.
 - **The AU preset name:** the class data carried the wrapper's own "Program" instead of the preset a host had set, which caused auval's "Preset name is not retained in retrieved class data" warning on every AU. It now carries the AU SDK's current preset, and restoring class data sets that preset again.
 
