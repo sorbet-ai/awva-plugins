@@ -147,7 +147,7 @@ struct Plugin {
 	const clap_host* host;
 	const nsc_component& c = comp();
 	const nsc_desc& d = desc();
-	void *state, *fast, *large;
+	void *state, *stream, *bulk; // (the regions: hot, stream, bulk)
 	int sr = 48000;
 	int nv;
 	bool active = false;
@@ -207,15 +207,15 @@ struct Plugin {
 
 	int factory = -1; // the factory preset the sound started from (preset-load, or a state); -1: none
 	int out_index = -1; // the component's "output" parameter (not a preset's: the state keeps it)
-	void *sx_state = nullptr, *sx_fast = nullptr, *sx_large = nullptr; // a scratch instance (main thread)
+	void *sx_state = nullptr, *sx_stream = nullptr, *sx_bulk = nullptr; // a scratch instance (main thread)
 
 	explicit Plugin(const clap_host* h) : host(h), nv(std::min(kMaxVoices, d.max_voices)) {
 		for (int i = 0; i < d.num_params; i++)
 			if (!std::strcmp(d.params[i].name, "output")) out_index = i;
-		state = region(d.state_bytes);
-		fast = region(d.fast_bytes);
-		large = region(d.large_bytes);
-		(void)c.init(state, fast, large, sr, nv); // (48 kHz: in every engine's range)
+		state = region(d.hot_bytes);
+		stream = region(d.stream_bytes);
+		bulk = region(d.bulk_bytes);
+		(void)init_at(state, stream, bulk, sr); // (48 kHz: in every engine's range)
 		factory = c.preset(state); // (the preset init() leaves: the engine's default, -1 for none)
 		pending.values.assign(static_cast<size_t>(d.num_params), NAN);
 		gui_val.assign(static_cast<size_t>(d.num_params), NAN);
@@ -224,13 +224,19 @@ struct Plugin {
 	~Plugin();
 	void free_regions() {
 		region_free(state);
-		region_free(fast);
-		region_free(large);
+		region_free(stream);
+		region_free(bulk);
 		if (sx_state) {
 			region_free(sx_state);
-			region_free(sx_fast);
-			region_free(sx_large);
+			region_free(sx_stream);
+			region_free(sx_bulk);
 		}
+	}
+
+	// init at a rate: the plugin's configuration (MIDI taken every block, nv voices)
+	int32_t init_at(void* s, void* st, void* bu, int rate) const {
+		const nsc_config cfg = {rate, 0, nv};
+		return c.init(s, st, bu, &cfg);
 	}
 
 	int index_of(clap_id id) const { return id == kMonoId ? -1 : c.param_index(id); }
@@ -396,11 +402,11 @@ struct Plugin {
 	// so the live one isn't touched: false if it isn't this engine's preset
 	bool read_preset(const std::string& json, float keep_output, std::vector<float>* values) {
 		if (!sx_state) {
-			sx_state = region(d.state_bytes);
-			sx_fast = region(d.fast_bytes);
-			sx_large = region(d.large_bytes);
+			sx_state = region(d.hot_bytes);
+			sx_stream = region(d.stream_bytes);
+			sx_bulk = region(d.bulk_bytes);
 		}
-		if (c.init(sx_state, sx_fast, sx_large, sr, nv) != 0) return false;
+		if (init_at(sx_state, sx_stream, sx_bulk, sr) != 0) return false;
 		if (c.load_preset(sx_state, json.data(), static_cast<uint32_t>(json.size()), nullptr) != 1) return false;
 		values->assign(static_cast<size_t>(d.num_params), 0.0f);
 		for (int i = 0; i < d.num_params; i++) (*values)[static_cast<size_t>(i)] = c.param(sx_state, i);
@@ -524,7 +530,7 @@ struct Plugin {
 			source.block(source.ctx, blocks, vc.data(), nv, &g);
 			c.process_voices(state, vc.data(), &g, out);
 		} else {
-			c.process(state, block_ev, n, out);
+			c.process(state, NSC_BLOCK, block_ev, n, out); // (a block a call: the engine's own, as the events are queued)
 			ended_notes(call_frame);
 		}
 		if (d.channels < 2) std::memcpy(buf[1], buf[0], sizeof buf[0]);
@@ -582,7 +588,7 @@ struct Plugin {
 			const int preset = c.preset(state);
 			std::vector<float> values(static_cast<size_t>(d.num_params));
 			for (int i = 0; i < d.num_params; i++) values[static_cast<size_t>(i)] = c.param(state, i);
-			if (c.init(state, fast, large, new_sr, nv) != 0) return false;
+			if (init_at(state, stream, bulk, new_sr) != 0) return false;
 			sr = new_sr;
 			apply(preset, mono ? 1 : 0, values);
 		} else {

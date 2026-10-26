@@ -35,7 +35,7 @@
   A preset file (`awva-preset/1`, `.preset.json`, as in awva's `presets/`) loads through CLAP preset-load from its path.
 - **State:** a project saves the sound as an `awva-preset/1` file, and a project restores it exactly. It also stores the output level, mono and the factory preset the sound started from (see below).
 
-All the plugins come from one generic source, `src/plugin.cpp`, which sees only CLAP and awva's engine component ABI (`nsc/nsc.h`, ABI 4). Each engine's component is linked in, built by awva's `awva_add_component(<target> <engine> STATIC)`. The plugin takes everything it shows from the component's descriptor: the name, summary, parameters, factory presets, voices and tail. clap-wrapper makes the VST3 and the AU from the same code.
+All the plugins come from one generic source, `src/plugin.cpp`, which sees only CLAP and awva's engine component ABI (`nsc/nsc.h`, ABI 5). Each engine's component is linked in, built by awva's `awva_add_component(<target> <engine> STATIC)`. The plugin takes everything it shows from the component's descriptor: the name, summary, parameters, factory presets, voices and tail. clap-wrapper makes the VST3 and the AU from the same code.
 
 ## The standalone app
 

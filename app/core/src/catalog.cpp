@@ -247,7 +247,7 @@ std::string Catalog::json() const {
 		s += ",\"builtin\":" + std::string(e.key.rfind("builtin:", 0) == 0 ? "true" : "false");
 		s += ",\"id\":" + jstr(d ? d->id : "") + ",\"title\":" + jstr(d ? d->name : e.source);
 		s += ",\"version\":" + jstr(d && d->version ? d->version : "") + ",\"summary\":" + jstr(d && d->summary ? d->summary : "");
-		s += ",\"colour\":" + jstr(d ? colour(d->led) : "") + ",\"ok\":" + (e.ok ? "true" : "false") + ",\"error\":" + jstr(e.error);
+		s += ",\"colour\":" + jstr(d ? colour(d->colour) : "") + ",\"ok\":" + (e.ok ? "true" : "false") + ",\"error\":" + jstr(e.error);
 		s += ",\"refused\":[";
 		for (size_t i = 0; i < e.refused.size(); i++) s += (i ? "," : "") + jstr(e.refused[i]);
 		s += "]}";

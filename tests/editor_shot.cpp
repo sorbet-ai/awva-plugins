@@ -25,7 +25,8 @@ struct ShotHost : Host {
 	std::string th;
 	explicit ShotHost(const nsc_component& comp, const std::string& theme) : c(comp), th(theme) {
 		nsc_instance_new(&c, &in);
-		c.init(in.state, in.fast, in.large, 48000, 10);
+		const nsc_config cfg = {48000, 0, 10};
+		c.init(in.state, in.stream, in.bulk, &cfg);
 	}
 	~ShotHost() override { nsc_instance_free(&in); }
 	const nsc_desc& desc() const override { return *c.desc; }

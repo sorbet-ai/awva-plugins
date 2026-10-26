@@ -407,8 +407,9 @@ std::vector<Timed> as_clap(const std::vector<Ev>& perf, bool midi1) {
 // the component library, block by block, each event at its frame
 std::vector<float> render_component(const nsc_component& c, const std::vector<Ev>& perf, uint64_t frames, int rate, int nv, bool mono) {
 	nsc_instance in;
+	const nsc_config cfg = {rate, 0, nv};
 	if (nsc_instance_new(&c, &in) != 0) return {};
-	if (c.init(in.state, in.fast, in.large, rate, nv) != 0) return {};
+	if (c.init(in.state, in.stream, in.bulk, &cfg) != 0) return {};
 	if (mono) (void)c.mode(in.state, NSC_MODE_MONO, 1);
 	std::vector<float> out;
 	size_t k = 0;
@@ -418,7 +419,7 @@ std::vector<float> render_component(const nsc_component& c, const std::vector<Ev
 		for (; k < perf.size() && perf[k].frame < b0 + NSC_BLOCK; k++)
 			ev.push_back({static_cast<int32_t>(perf[k].frame - b0), -1, {perf[k].w0, perf[k].w1, 0, 0}});
 		float* o[2] = {buf[0], buf[1]};
-		c.process(in.state, ev.data(), static_cast<int32_t>(ev.size()), o);
+		c.process(in.state, NSC_BLOCK, ev.data(), static_cast<int32_t>(ev.size()), o);
 		out.insert(out.end(), buf[0], buf[0] + NSC_BLOCK);
 	}
 	nsc_instance_free(&in);
@@ -738,7 +739,8 @@ double play_timed(const std::vector<Timed>& events, uint64_t frames, uint32_t bl
 // the component alone, the same UMP in 32-frame blocks
 double component_timed(const nsc_component& c, const std::vector<expressive::Packet>& u, uint64_t frames, int rate, int nv) {
 	nsc_instance in;
-	if (nsc_instance_new(&c, &in) != 0 || c.init(in.state, in.fast, in.large, rate, nv) != 0) return -1;
+	const nsc_config cfg = {rate, 0, nv};
+	if (nsc_instance_new(&c, &in) != 0 || c.init(in.state, in.stream, in.bulk, &cfg) != 0) return -1;
 	size_t k = 0;
 	float buf[2][NSC_BLOCK];
 	float* o[2] = {buf[0], buf[1]};
@@ -748,7 +750,7 @@ double component_timed(const nsc_component& c, const std::vector<expressive::Pac
 		ev.clear();
 		for (; k < u.size() && u[k].frame < b0 + NSC_BLOCK; k++) ev.push_back({static_cast<int32_t>(u[k].frame - b0), -1, {u[k].w0, u[k].w1, 0, 0}});
 		const auto t0 = std::chrono::steady_clock::now();
-		c.process(in.state, ev.data(), static_cast<int32_t>(ev.size()), o);
+		c.process(in.state, NSC_BLOCK, ev.data(), static_cast<int32_t>(ev.size()), o);
 		spent += std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
 	}
 	nsc_instance_free(&in);

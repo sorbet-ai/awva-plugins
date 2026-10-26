@@ -42,7 +42,7 @@ inline void region_free(void* p) {
 struct Instance {
 	const nsc_component& c;
 	const nsc_desc& d;
-	void *state = nullptr, *fast = nullptr, *large = nullptr;
+	void *state = nullptr, *stream = nullptr, *bulk = nullptr; // (the regions: hot, stream, bulk)
 	int sr = 48000;
 	int nv;
 	bool mono = false;
@@ -61,21 +61,26 @@ struct Instance {
 	nsc_event block_ev[1024];
 
 	explicit Instance(const nsc_component& comp) : c(comp), d(*comp.desc), nv(std::min(kMaxVoices, comp.desc->max_voices)) {
-		state = region(d.state_bytes);
-		fast = region(d.fast_bytes);
-		large = region(d.large_bytes);
+		state = region(d.hot_bytes);
+		stream = region(d.stream_bytes);
+		bulk = region(d.bulk_bytes);
 	}
 	~Instance() {
 		region_free(state);
-		region_free(fast);
-		region_free(large);
+		region_free(stream);
+		region_free(bulk);
 	}
 	Instance(const Instance&) = delete;
 	Instance& operator=(const Instance&) = delete;
 
+	// the configuration the plugins run at: MIDI taken every block, nv voices
+	int32_t init_at(int rate) {
+		const nsc_config cfg = {rate, 0, nv};
+		return c.init(state, stream, bulk, &cfg);
+	}
 	// (UI thread, before any audio-thread call) 0, or -1 for a rate the engine doesn't take
 	int init(int rate) {
-		if (c.init(state, fast, large, rate, nv) != 0) return -1;
+		if (init_at(rate) != 0) return -1;
 		sr = rate;
 		clear();
 		return 0;
@@ -85,7 +90,7 @@ struct Instance {
 		const int preset = c.preset(state);
 		std::vector<float> values(static_cast<size_t>(d.num_params));
 		for (int i = 0; i < d.num_params; i++) values[static_cast<size_t>(i)] = c.param(state, i);
-		if (c.init(state, fast, large, rate, nv) != 0) return -1;
+		if (init_at(rate) != 0) return -1;
 		sr = rate;
 		if (preset >= 0 && preset < d.num_presets) c.set_preset(state, preset);
 		if (mono) (void)c.mode(state, NSC_MODE_MONO, 1);
@@ -123,7 +128,7 @@ struct Instance {
 			count--;
 		}
 		float* out[2] = {buf[0], buf[1]};
-		c.process(state, block_ev, n, out);
+		c.process(state, NSC_BLOCK, block_ev, n, out); // (a block a call, as the plugins do)
 		int32_t ids[32];
 		while (c.ended(state, ids, 32) == 32) {
 		}

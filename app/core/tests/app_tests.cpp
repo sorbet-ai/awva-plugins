@@ -152,8 +152,8 @@ bool write_awvapkg(const std::string& out, const std::string& manifest, const st
 		std::snprintf(h.arch, sizeof h.arch, "%s", im.tag.c_str());
 		std::snprintf(h.toolchain, sizeof h.toolchain, "app_tests");
 		h.image_size = static_cast<uint32_t>(lib.size());
-		h.state_bytes = d.state_bytes, h.fast_bytes = d.fast_bytes, h.large_bytes = d.large_bytes;
-		h.max_voices = d.max_voices, h.channels = d.channels, h.led = d.led, h.schema_hash = d.schema_hash;
+		h.hot_bytes = d.hot_bytes, h.stream_bytes = d.stream_bytes, h.bulk_bytes = d.bulk_bytes;
+		h.max_voices = d.max_voices, h.channels = d.channels, h.colour = d.colour, h.schema_hash = d.schema_hash;
 		std::snprintf(h.id, sizeof h.id, "%s", d.id);
 		std::snprintf(h.uid, sizeof h.uid, "%s", d.uid);
 		std::snprintf(h.version, sizeof h.version, "%s", d.version ? d.version : "");
