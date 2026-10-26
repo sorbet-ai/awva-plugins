@@ -409,7 +409,7 @@ std::vector<float> render_component(const nsc_component& c, const std::vector<Ev
 	nsc_instance in;
 	if (nsc_instance_new(&c, &in) != 0) return {};
 	if (c.init(in.state, in.fast, in.large, rate, nv) != 0) return {};
-	if (mono) (void)c.mode(in.state, NSC_MODE_LEGATO, 1);
+	if (mono) (void)c.mode(in.state, NSC_MODE_MONO, 1);
 	std::vector<float> out;
 	size_t k = 0;
 	float buf[2][NSC_BLOCK];

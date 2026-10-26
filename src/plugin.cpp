@@ -30,7 +30,7 @@
 // a 32-frame block) goes to the next block with its negative frame (a late event, nsc.h), so the
 // component takes it at its own step: any host block size gives the same samples, at any rate.
 // A parameter applies from the first block at or after its time.
-// Parameters: the component's, by its stable ids, plus "mono" (the component's mono mode, NSC_MODE_LEGATO: one voice, its notes slurred).
+// Parameters: the component's, by its stable ids, plus "mono" (the component's mono mode, NSC_MODE_MONO: one voice, played by every held key).
 // Presets: the factory presets through preset-discovery and preset-load (clap-wrapper makes them
 // the VST3's preset list and the AU's factory presets), and preset files (awva-preset/1, the
 // component's load_preset) through preset-load. State: the sound as an awva-preset/1 file (the
@@ -320,7 +320,7 @@ struct Plugin {
 	void param(const clap_event_param_value& e) {
 		if (e.param_id == kMonoId) {
 			mono = e.value >= 0.5;
-			(void)c.mode(state, NSC_MODE_LEGATO, mono ? 1 : 0);
+			(void)c.mode(state, NSC_MODE_MONO, mono ? 1 : 0);
 			return;
 		}
 		const int i = index_of(e.param_id);
@@ -349,7 +349,7 @@ struct Plugin {
 		if (preset >= 0 && preset < d.num_presets) c.set_preset(state, preset);
 		if (leg >= 0) {
 			mono = leg != 0;
-			(void)c.mode(state, NSC_MODE_LEGATO, leg);
+			(void)c.mode(state, NSC_MODE_MONO, leg);
 		}
 		for (int i = 0; i < d.num_params && i < static_cast<int>(values.size()); i++)
 			if (!std::isnan(values[static_cast<size_t>(i)])) (void)c.set_param(state, i, values[static_cast<size_t>(i)]);
@@ -417,7 +417,7 @@ struct Plugin {
 			if (out_index >= 0) (void)c.set_param(state, out_index, output);
 			if (leg >= 0) {
 				mono = leg != 0;
-				(void)c.mode(state, NSC_MODE_LEGATO, leg);
+				(void)c.mode(state, NSC_MODE_MONO, leg);
 			}
 			rescan_values();
 			return true;

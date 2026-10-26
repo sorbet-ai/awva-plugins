@@ -3,7 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # One iteration of an engine for the awva app: an engine change (in an awva checkout) as a package
-# the running app lists within two seconds, next to the built-in engine it changes.
+# (<engine>-iter<n>.awvapkg, awva-package/2) the running app lists within two seconds, next to the
+# built-in engine it changes.
 #
 #   app/tools/iterate.sh ENGINE AWVA_DIR [options]
 #     ENGINE           accordion bowed brass ep modal reed sine trumpet va wind
@@ -16,11 +17,12 @@
 #                      ~/Library/Application Support/awva/engines)
 #     --cli PATH       awva_app_cli (default: build/app/awva_app_cli of this repository), for the check
 #
-# What it does: builds the engine's component library from AWVA_DIR (awva's sdk, in AWVA_DIR/build/
-# iterate, incremental: the first build compiles every engine once), with its presets compiled in;
-# writes the package <ENGINE>-iter<n> (the next free n) into the packages folder through a hidden
-# folder, so the app never sees half of one; then checks it as the app would play it (every preset
-# rendered offline: finite, sounding) and compares it with the built-in engine, preset by preset.
+# What it does: builds awva's own package_<ENGINE> target from AWVA_DIR (its sdk, in AWVA_DIR/build/
+# iterate, incremental: the first build compiles every engine once): the engine's package library
+# (the board's MIDI table sizes, as every host's), its presets, the label and the awva commit, as
+# <ENGINE>-iter<n>.awvapkg (the next free n); moves it in as .tmp, then renamed, so the app never sees
+# half of one; then checks it as the app would play it (every preset rendered offline: finite,
+# sounding) and compares it with the built-in engine, preset by preset.
 # Nothing opens an audio device.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -62,6 +64,9 @@ fi
 mkdir -p "$engines"
 [ -n "$cli" ] || cli="$HERE/build/app/awva_app_cli$exe"
 [ -x "$cli" ] || die "no $cli: build the app's core first (./build.sh build)"
+packer="$awva/component/tools/nsc_pack.py"
+[ -f "$packer" ] || die "$awva has no packager (component/tools/nsc_pack.py): not on the app's awva"
+py="$(command -v python3 || command -v python)"
 
 # the base: the app's awva commit, and its nsc.h (the package format's pin)
 base="$(head -n 1 "$HERE/AWVA_COMMIT" | tr -d '\r')"
@@ -72,25 +77,24 @@ git -C "$awva" diff --quiet "$base" -- component/include/nsc/nsc.h || die "$awva
 
 # the next iteration
 n=1
-for d in "$engines/$engine"-iter*; do
-  [ -d "$d" ] || continue
+for d in "$engines/$engine"-iter*.awvapkg; do
+  [ -f "$d" ] || continue
   k="${d##*-iter}"
+  k="${k%.awvapkg}"
   case "$k" in '' | *[!0-9]*) continue ;; esac
   [ "$k" -ge "$n" ] && n=$((k + 1))
 done
 name="$engine-iter$n"
 [ -n "$label" ] || label="$engine iter $n"
-tmp="$engines/.$name"
-rm -rf "$tmp"
-mkdir -p "$tmp"
-trap 'rm -rf "$tmp"' EXIT
-json_str() { printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"; }
+out="$engines/$name.awvapkg"
+tmp="$out.tmp"
+work="$(mktemp -d)"
+trap 'rm -rf "$tmp" "$work"' EXIT
 
 if [ "$presets_only" = 1 ]; then
   ls "$awva/presets/$engine/"*.preset.json > /dev/null 2>&1 || die "$awva/presets/$engine has no presets"
-  mkdir -p "$tmp/presets"
-  cp "$awva/presets/$engine/"*.preset.json "$tmp/presets/"
-  printf '{"format": "awva-package/1", "label": %s, "engine": "%s"}\n' "$(json_str "$label")" "$engine" > "$tmp/awva-package.json"
+  "$py" "$(native "$packer")" package "$(native "$work/p.awvapkg")" --engine "$engine" --label "$label" --presets "$(native "$awva/presets/$engine")" > /dev/null
+  cp "$work/p.awvapkg" "$tmp"
 else
   # the presets into the engine (presets/*.preset.json -> dsp/include/awva/presets/*.inc), then the
   # component library: awva's sdk build, with the toolchain the app's built-ins are built with
@@ -113,23 +117,22 @@ else
   version="$(git -C "$awva" rev-parse --short=7 HEAD)"
   [ -z "$(git -C "$awva" status --porcelain -- dsp sdk component presets)" ] || version="$version-dirty"
   [ -f "$awva/build/iterate/CMakeCache.txt" ] || echo "iterate: configuring $awva/build/iterate (the first build compiles every engine once)"
-  run "cmake -S sdk -B build/iterate $gen -DAWVA_VERSION=$version" > /dev/null
+  run "cmake -S sdk -B build/iterate $gen -DAWVA_VERSION=$version \"-DAWVA_PACKAGE_DIR=$(native "$work")\" \"-DAWVA_PACKAGE_LABEL=$label\" -DAWVA_PACKAGE_AWVA=$short -DAWVA_PACKAGE_SLUG=iter$n" > /dev/null
   echo "iterate: building $engine ($version)"
-  run "cmake --build build/iterate --target nsc_$engine" | grep -E "error|FAILED" || true
-  lib="$awva/build/iterate/components/$engine$suffix"
-  [ -f "$lib" ] || die "the build gave no $lib"
-  cp "$lib" "$tmp/$engine$suffix"
-  printf '{"format": "awva-package/1", "label": %s, "library": "%s", "awva": "%s"}\n' "$(json_str "$label")" "$engine$suffix" "$short" > "$tmp/awva-package.json"
+  run "cmake --build build/iterate --target package_$engine" | grep -E "error|FAILED" || true
+  pkg="$work/$engine-iter$n.awvapkg"
+  [ -f "$pkg" ] || die "the build gave no $pkg"
+  cp "$pkg" "$tmp"
 fi
 
 # into place in one step (the app lists it within two seconds)
-mv "$tmp" "$engines/$name"
-trap - EXIT
-echo "iterate: wrote $(native "$engines/$name") \"$label\""
+mv "$tmp" "$out"
+trap 'rm -rf "$work"' EXIT
+echo "iterate: wrote $(native "$out") \"$label\""
 
 # as the app would play it, and against the built-in engine
 "$cli" check --engine "package:$name" --against "builtin:$engine" --engines "$(native "$engines")" || {
-  echo "iterate: the package doesn't pass its check; it stays listed with the reason (remove: rm -r \"$engines/$name\")" >&2
+  echo "iterate: the package doesn't pass its check; it stays listed with the reason (remove: rm \"$out\")" >&2
   exit 1
 }
 echo "iterate: $name ready in $(($(date +%s) - t0)) s: in the app, choose \"$label\" under \"your engines\""

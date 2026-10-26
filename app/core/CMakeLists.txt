@@ -4,8 +4,8 @@
 # The awva app's core (awva_app.h), built by the plugins' build (the same toolchain and awva), so the
 # app plays what the plugins play:
 #   awva_app_core          the shared library the Flutter UI loads (dart:ffi)
-#   app/engines/<id>.*     the built-in engines: awva's component libraries (nsc_<id>, the ones the
-#                          plugins' ump proof checks the plugins against), beside the core
+#   app/engines/<id>.*     the built-in engines: awva's package libraries (package_lib_<id>: the board's
+#                          MIDI table sizes, the PC image a package carries), beside the core
 #   awva_app_cli           the core without the UI: list, smoke (the null sink), render
 #   ctest -L app           the core's checks, the smoke run, and the app's output against each plugin's
 set(_src src/app.cpp src/catalog.cpp src/platform.cpp src/audio_null.cpp src/audio_query.cpp)
@@ -42,13 +42,19 @@ target_include_directories(awva_app_static PUBLIC include src "${AWVA_DIR}/compo
 target_link_libraries(awva_app_static PUBLIC ${_libs})
 target_compile_definitions(awva_app_static PUBLIC "AWVA_APP_AWVA_COMMIT=\"${AWVA_COMMIT_FULL}\"")
 
-# the built-in engines: every awva engine's component library, copied beside the core
+# the built-in engines: every awva engine's package library (awva's awva_add_package_library: the
+# board's MIDI table sizes, the one PC image every host loads, as in a package), beside the core
 set(_copies "")
+set(_libs_built "")
 foreach(v IN LISTS AWVA_ENGINES)
-  list(APPEND _copies COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:nsc_${v}>" "${AWVA_APP_OUT}/engines/")
+  if(NOT TARGET package_lib_${v})
+    message(FATAL_ERROR "awva's package_lib_${v} is missing: the app's built-ins need Python 3 (awva's packages)")
+  endif()
+  list(APPEND _copies COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:package_lib_${v}>" "${AWVA_APP_OUT}/engines/")
+  list(APPEND _libs_built package_lib_${v})
 endforeach()
 add_custom_target(awva_app_engines ALL COMMAND "${CMAKE_COMMAND}" -E make_directory "${AWVA_APP_OUT}/engines" ${_copies} VERBATIM)
-add_dependencies(awva_app_engines nsc_components)
+add_dependencies(awva_app_engines ${_libs_built})
 add_custom_target(awva_app ALL DEPENDS awva_app_core awva_app_engines)
 
 add_executable(awva_app_cli tools/awva_app_cli.cpp)
@@ -79,6 +85,6 @@ foreach(v IN LISTS AWVA_PLUGIN_ENGINES)
   else()
     set(_clap "$<TARGET_FILE:awva_${v}_clap>")
   endif()
-  add_test(NAME app.${v}.equals_plugin COMMAND render_equal "${_clap}" "$<TARGET_FILE:nsc_${v}>")
+  add_test(NAME app.${v}.equals_plugin COMMAND render_equal "${_clap}" "$<TARGET_FILE:package_lib_${v}>")
   set_tests_properties(app.${v}.equals_plugin PROPERTIES LABELS app)
 endforeach()
