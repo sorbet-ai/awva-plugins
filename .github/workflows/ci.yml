@@ -1,0 +1,146 @@
+# SPDX-FileCopyrightText: 2026 Sorbet AI
+# SPDX-License-Identifier: Apache-2.0
+#
+# awva-plugins CI, on Windows (x64) and macOS (universal):
+#   1. Fetch awva at AWVA_COMMIT, the dependencies and the validators (fetch_deps.sh: each pinned
+#      by commit or SHA-256).
+#   2. Build every engine as CLAP, VST3 and (macOS) AU.
+#   3. The bit-identity proofs (ctest -L plugin).
+#   4. clap-validator, pluginval at strictness 10 on the VST3, and on macOS auval -strict, with the
+#      AU installed in the runner's ~/Library for the run.
+#   5. The release archive of the platform.
+# On a tag v<version> (the version must be CMakeLists.txt's), the release job publishes both
+# archives with SHA256SUMS as a GitHub release.
+#
+# Code signing and notarization are written in but off: set SIGNING to 'true' below once the
+# secrets exist (README, "Signing"):
+#   macOS:   MACOS_CERTIFICATE_P12_BASE64, MACOS_CERTIFICATE_PASSWORD, MACOS_SIGNING_IDENTITY
+#            ("Developer ID Application: ..."), MACOS_NOTARY_APPLE_ID, MACOS_NOTARY_TEAM_ID,
+#            MACOS_NOTARY_PASSWORD (an app-specific password)
+#   Windows: WINDOWS_CERTIFICATE_PFX_BASE64, WINDOWS_CERTIFICATE_PASSWORD
+name: ci
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+permissions:
+  contents: read
+env:
+  SIGNING: "false"
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            platform: windows-x64
+          - os: macos-15
+            platform: macos-universal
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - name: tools
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then command -v ninja || choco install ninja -y; fi
+          if [ "$RUNNER_OS" = macOS ]; then brew list ninja > /dev/null 2>&1 || brew install ninja; fi
+      - name: dependencies
+        run: ./fetch_deps.sh --validators
+      - name: build
+        run: ./build.sh build
+      - name: bit-identity proofs
+        run: ./build.sh test -j 4
+      - name: validators
+        env:
+          AUVAL_DIRECT: "1"
+        run: tools/validate.sh
+      - name: validator logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validate-${{ matrix.platform }}
+          path: build/validate/
+
+      # --- signing (off: SIGNING above) ----------------------------------------------------------
+      - name: sign (macOS)
+        if: env.SIGNING == 'true' && runner.os == 'macOS'
+        env:
+          P12: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+        run: |
+          kc="$RUNNER_TEMP/signing.keychain-db"
+          kcpw="$(uuidgen)"
+          security create-keychain -p "$kcpw" "$kc"
+          security set-keychain-settings -lut 3600 "$kc"
+          security unlock-keychain -p "$kcpw" "$kc"
+          echo "$P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$kc" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$kcpw" "$kc"
+          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          for b in build/awva_*.clap build/awva_*.vst3 build/awva_*.component; do
+            codesign --force --deep --options runtime --timestamp --sign "$IDENTITY" "$b"
+          done
+      - name: sign (Windows)
+        if: env.SIGNING == 'true' && runner.os == 'Windows'
+        env:
+          PFX: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
+          PFX_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          echo "$PFX" | base64 --decode > "$RUNNER_TEMP/cert.pfx"
+          signtool="$(ls "/c/Program Files (x86)/Windows Kits/10/bin/"*/x64/signtool.exe | tail -n 1)"
+          for f in build/awva_*.clap $(find build -path '*awva_*.vst3' -type f); do
+            "$signtool" sign //f "$(cygpath -w "$RUNNER_TEMP/cert.pfx")" //p "$PFX_PASSWORD" //fd sha256 \
+              //tr http://timestamp.digicert.com //td sha256 "$(cygpath -w "$f")"
+          done
+          rm -f "$RUNNER_TEMP/cert.pfx"
+
+      - name: package
+        id: package
+        run: echo "zip=$(tools/package.sh ${{ matrix.platform }})" >> "$GITHUB_OUTPUT"
+      - name: notarize (macOS)
+        if: env.SIGNING == 'true' && runner.os == 'macOS'
+        env:
+          APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+          PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+        run: |
+          xcrun notarytool submit "${{ steps.package.outputs.zip }}" --apple-id "$APPLE_ID" --team-id "$TEAM_ID" \
+            --password "$PASSWORD" --wait
+          d="dist/$(basename "${{ steps.package.outputs.zip }}" .zip)"
+          for b in "$d"/CLAP/*.clap "$d"/VST3/*.vst3 "$d"/AU/*.component; do xcrun stapler staple "$b"; done
+          rm -f "${{ steps.package.outputs.zip }}"
+          (cd dist && ditto -c -k --keepParent "$(basename "$d")" "$(basename "$d").zip")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.platform }}
+          path: ${{ steps.package.outputs.zip }}
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - name: the tag is the version
+        run: |
+          v="$(sed -n 's/^project(awva_plugins VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)"
+          [ "${GITHUB_REF_NAME}" = "v$v" ] || { echo "tag ${GITHUB_REF_NAME} but CMakeLists.txt says $v"; exit 1; }
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: package-*
+          path: dist
+          merge-multiple: true
+      - name: SHA256SUMS
+        run: cd dist && sha256sum *.zip > SHA256SUMS && cat SHA256SUMS
+      - name: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/*.zip dist/SHA256SUMS --title "awva-plugins $GITHUB_REF_NAME" --notes-file NOTICE
