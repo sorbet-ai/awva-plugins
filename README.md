@@ -128,8 +128,8 @@ tools/package.sh windows-x64      # or macos-universal: dist/awva-plugins-<versi
 - **expressive.clap, .vst3, .au:** the same expressive performances through each format's own events, against awva_render's render of their UMP stream, bit for bit (see [Expressive input](#expressive-input)).
 - **perf:** the engine's default preset playing the awva SDK's default scripted performance.
   - The proof runs it through the plugin by a private test extension, `com.sorbet-ai.awva.voice-controls/1`; a DAW never uses it.
-  - The output must equal `awva_render --ftz`'s x 0.25, bit for bit, at host blocks of 256, 1, 33 and random sizes. `--ftz` runs each block with subnormals flushed, as the component does.
-- **midi:** a Standard MIDI File (MPE notes with bends, pressure and CC74, a master-channel note, the pedal) in the MIDI dialect, each event at its time rounded to the nearest frame. The output must equal `awva_render --ftz --midi`'s x 0.25, bit for bit, at 48 and 44.1 kHz and host blocks of 256, 1, 33 and random sizes. The plugin and the renderer take MIDI by the same integer-frame step rule.
+  - The output must equal `awva_render --ftz`'s, bit for bit, at host blocks of 256, 1, 33 and random sizes. `--ftz` runs each block with subnormals flushed, as the component does.
+- **midi:** a Standard MIDI File (MPE notes with bends, pressure and CC74, a master-channel note, the pedal) in the MIDI dialect, each event at its time rounded to the nearest frame. The output must equal `awva_render --ftz --midi`'s, bit for bit, at 48 and 44.1 kHz and host blocks of 256, 1, 33 and random sizes. The plugin and the renderer take MIDI by the same integer-frame step rule.
 - **ump:** MIDI 2.0 and MIDI 1.0 input, polyphonic and mono, at 48 and 44.1 kHz and host blocks of 256, 1, 33 and random sizes. The output must equal, bit for bit, the engine's own component library given the same UMP at the same frames.
 - **notes:** CLAP notes and expressions must give the same output as their MIDI 2.0 translation, whatever the host block size, with a NOTE_END for each note.
 - **many:** 20 overlapping CLAP notes, each with its own brightness:
@@ -141,7 +141,7 @@ None of the proofs or validators opens an audio device.
 
 ## Expressive input
 
-The proof `plugin.<engine>.expressive.<format>` plays the same two performances (`tests/expressive.h`) through each format's own events. The output must equal, bit for bit and x 0.25, `awva_render --ftz --ump`'s render of the UMP stream that the format carries to the engine. It runs at 48 and 44.1 kHz, in host blocks of 128 (CLAP: 256), 1, 33 and random sizes.
+The proof `plugin.<engine>.expressive.<format>` plays the same two performances (`tests/expressive.h`) through each format's own events. The output must equal, bit for bit, `awva_render --ftz --ump`'s render of the UMP stream that the format carries to the engine. It runs at 48 and 44.1 kHz, in host blocks of 128 (CLAP: 256), 1, 33 and random sizes.
 - **per-note:** five overlapping notes on three channels, two of them on the same key. Each has its own pressure, tuning and brightness, and every value is exact in every format.
 - **MPE:** the bend range set by RPN, five notes on member channels, each channel's pitch bend, pressure and CC74, and the master channel's bend.
 

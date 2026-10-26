@@ -47,7 +47,7 @@ same design is what the plugins show in a DAW, drawn natively (`DESIGN.md`).
 - A true-peak limiter at -1 dBTP is always on after the level (1.4 ms look-ahead, inter-sample peaks
   by 4x oversampling). Below its ceiling it passes the samples exactly.
 - A hard ceiling at 0 dBFS after it.
-- An engine whose output isn't finite, or passes awva's bound (8, before the app's x0.25), is muted
+- An engine whose output isn't finite, or passes awva's bound (2: the output is nominal +-1), is muted
   and reset at once. A package's engine that does it is stopped until you choose another engine.
 - The OS's volume applies after all of this.
 

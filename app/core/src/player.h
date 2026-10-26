@@ -97,8 +97,8 @@ public:
 		setup.see(w);
 		if (inst) inst->push(f, w);
 	}
-	// the awva contract's bound on an engine's output (8), after the x0.25: beyond it the engine is broken
-	static constexpr float kEngineBound = 8.0f * kGain;
+	// the awva contract's bound on an engine's output (2, at its scale: nominal +-1): beyond it the engine is broken
+	static constexpr float kEngineBound = 2.0f;
 	bool stopped = false; // a package engine that broke the bound: silent until the next swap
 
 	Safety::Result render(float* l, float* r, uint32_t n) {

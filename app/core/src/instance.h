@@ -4,7 +4,7 @@
 // One engine instance, driven exactly as the plugins drive theirs (src/plugin.cpp): UMP events
 // queued at absolute frames, a 32-frame block rendered when its first frame is due with every event
 // of its frames (an event whose block was already rendered goes to the next block at its negative
-// frame: a late event, nsc.h), x0.25 (awva_render's WAV scaling), subnormals flushed. So the app
+// frame: a late event, nsc.h), at unity (awva's output is nominal +-1), subnormals flushed. So the app
 // plays what the plugins play, sample for sample (app/core/tests/render_equal.cpp checks it).
 //
 // Threads: create, init and the scratch reads on the UI thread; push(), render() and the setters
@@ -24,7 +24,6 @@
 
 namespace awva_app {
 
-constexpr float kGain = 0.25f; // the plugins' unity (awva_render's WAV scaling: the engines run about +-4)
 constexpr int kMaxVoices = 10; // the plugins' voices
 
 inline float flush(float x) { return x != 0.0f && std::fabs(x) < FLT_MIN ? std::copysign(0.0f, x) : x; }
@@ -139,8 +138,8 @@ struct Instance {
 	void render(float* l, float* r, uint32_t n) {
 		for (uint32_t i = 0; i < n; i++) {
 			if (pos == NSC_BLOCK) render_block();
-			l[i] = flush(buf[0][pos] * kGain);
-			r[i] = flush(buf[1][pos] * kGain);
+			l[i] = flush(buf[0][pos]);
+			r[i] = flush(buf[1][pos]);
 			pos++;
 		}
 	}

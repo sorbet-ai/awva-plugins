@@ -13,7 +13,7 @@
 //     1.0 (MusicDeviceMIDIEvent) and as MIDI 1.0 event lists (protocol 1.0), which the system
 //     gives the AU translated to MIDI 2.0 (it asked for 2.0). Each must equal awva_render --ftz
 //     --ump's render of its UMP stream (DIR/ref_per_note_RATE.f32, and DIR/ref_mpe_midi2_RATE.f32:
-//     the UMP spec's default translation) x 0.25, bit for bit.
+//     the UMP spec's default translation), bit for bit.
 //   au_host_test bench PLUGIN.component VOICES
 //     As clap_host_test bench, through the AU (MIDI 2.0 event lists): "bench au N LOAD%" for 1, 4
 //     and VOICES notes, and "latency au REPORTED MIN MAX" (REPORTED: kAudioUnitProperty_Latency in
@@ -160,7 +160,7 @@ std::string blocks_name(int b) { return b > 0 ? std::to_string(b) : std::string(
 void expect_ref(const std::vector<float>& out, const std::vector<float>& ref, const std::string& what) {
 	const expressive::Diff d = expressive::differ(out, ref);
 	char line[400];
-	std::snprintf(line, sizeof line, "%s: %zu frames (peak %.3f) bit for bit awva_render --ftz --ump's x 0.25", what.c_str(), ref.size(), d.peak);
+	std::snprintf(line, sizeof line, "%s: %zu frames (peak %.3f) bit for bit awva_render --ftz --ump's", what.c_str(), ref.size(), d.peak);
 	check(!ref.empty() && d.bad == 0 && d.peak > 0.001, line);
 	if (d.bad) std::printf("     %zu frames differ, the first at %zu, by up to %.3g (%.1f dBFS)\n", d.bad, d.first, d.max_diff, 20 * std::log10(d.max_diff + 1e-300));
 }

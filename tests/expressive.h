@@ -284,7 +284,7 @@ inline std::vector<float> read_f32(const std::string& path) {
 	return v;
 }
 
-// a plugin's stereo output (interleaved) against a mono reference x 0.25, subnormals flushed, as
+// a plugin's stereo output (interleaved) against a mono reference, subnormals flushed, as
 // the plugins give it: the frames that differ (both channels must be it), the first, the largest
 // difference and the reference's peak
 struct Diff {
@@ -295,7 +295,7 @@ inline float flush(float x) { return x != 0.0f && std::fabs(x) < 1.17549435e-38f
 inline Diff differ(const std::vector<float>& out, const std::vector<float>& ref) {
 	Diff d;
 	for (size_t i = 0; i < ref.size() && 2 * i + 1 < out.size(); i++) {
-		const float want = flush(ref[i] * 0.25f);
+		const float want = flush(ref[i]);
 		d.peak = std::fmax(d.peak, std::fabs(want));
 		bool same = true;
 		for (int c = 0; c < 2; c++) {

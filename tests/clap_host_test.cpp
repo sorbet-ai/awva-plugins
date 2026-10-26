@@ -13,11 +13,11 @@
 //     The SDK's default scripted performance through the plugin (its voice-controls test
 //     extension: the controls of every block, as awva_render gives them to the engine), in host
 //     blocks of 256, 1, 33 and random sizes: the output must be awva_render's REF (mono, unscaled)
-//     x 0.25, subnormals flushed, bit for bit, on both channels.
+//    , subnormals flushed, bit for bit, on both channels.
 //   clap_host_test midifile PLUGIN.clap FILE.mid REF.f32 [RATE]
 //     A Standard MIDI File in the MIDI dialect, each event at its frame (its time rounded to the
 //     nearest frame, as awva_render places it), in host blocks of 256, 1, 33 and random sizes:
-//     the output must be awva_render --midi's REF (mono, unscaled) x 0.25, bit for bit.
+//     the output must be awva_render --midi's REF (mono, unscaled), bit for bit.
 //   clap_host_test ump PLUGIN.clap COMPONENT_LIB
 //     A MIDI 2.0 performance (MIDI2 dialect) and a MIDI 1.0 one (MIDI dialect), polyphonic and
 //     mono, in host blocks of 256, 1, 33 and random sizes at 48 and 44.1 kHz, against the engine's
@@ -34,7 +34,7 @@
 //     The expressive performances (tests/expressive.h) through every CLAP dialect, in host blocks
 //     of 256, 1, 33 and random sizes: per_note as CLAP notes with pressure, tuning and brightness
 //     expressions and as MIDI 2.0 (MIDI2 dialect), mpe as MIDI 1.0 (MIDI dialect). Each must equal
-//     awva_render --ftz --ump's render of its UMP stream (DIR/ref_<performance>_RATE.f32) x 0.25,
+//     awva_render --ftz --ump's render of its UMP stream (DIR/ref_<performance>_RATE.f32),
 //     bit for bit.
 //   clap_host_test bench PLUGIN.clap COMPONENT_LIB
 //     The CPU load at 48 kHz in host blocks of 128 (tests/expressive.h bench: 1, 4 and the plugin's
@@ -240,12 +240,12 @@ std::vector<float> play(const std::vector<Timed>& events, uint64_t frames, int b
 }
 std::string blocks_name(int b) { return b > 0 ? std::to_string(b) : std::string("random 1..1024"); }
 
-// a plugin's stereo output against a mono reference x 0.25, flushed: frames that differ
+// a plugin's stereo output against a mono reference, flushed: frames that differ
 size_t differ(const std::vector<float>& out, const std::vector<float>& ref, size_t* first, double* peak) {
 	size_t bad = 0;
 	*peak = 0;
 	for (size_t i = 0; i < ref.size() && 2 * i + 1 < out.size(); i++) {
-		const float want = flush(ref[i] * 0.25f);
+		const float want = flush(ref[i]);
 		*peak = std::fmax(*peak, std::fabs(want));
 		if (std::memcmp(&out[2 * i], &want, 4) != 0 || std::memcmp(&out[2 * i + 1], &want, 4) != 0) {
 			if (!bad) *first = i;
@@ -302,7 +302,7 @@ int perf_test(const char* ref_path) {
 		double peak = 0;
 		const size_t bad = differ(out, ref, &first, &peak);
 		char what[320];
-		std::snprintf(what, sizeof what, "default performance, %d voices, host blocks %s: %zu frames (peak %.3f) bit for bit awva_render --ftz's x 0.25",
+		std::snprintf(what, sizeof what, "default performance, %d voices, host blocks %s: %zu frames (peak %.3f) bit for bit awva_render --ftz's",
 		    nv, blocks_name(block).c_str(), ref.size(), peak);
 		check(!ref.empty() && bad == 0 && peak > 0.001, what);
 		if (bad) std::printf("     %zu frames differ, the first at %zu\n", bad, first);
@@ -337,7 +337,7 @@ int midifile_test(const char* mid, const char* ref_path, int rate) {
 		double peak = 0;
 		const size_t bad = differ(out, ref, &first, &peak);
 		char what[320];
-		std::snprintf(what, sizeof what, "MIDI file (%zu events), %d Hz, host blocks %s: %zu frames (peak %.3f) bit for bit awva_render --ftz --midi's x 0.25",
+		std::snprintf(what, sizeof what, "MIDI file (%zu events), %d Hz, host blocks %s: %zu frames (peak %.3f) bit for bit awva_render --ftz --midi's",
 		    m.events.size(), rate, blocks_name(block).c_str(), ref.size(), peak);
 		check(!ref.empty() && bad == 0 && peak > 0.001, what);
 		if (bad) std::printf("     %zu frames differ, the first at %zu\n", bad, first);
@@ -448,7 +448,7 @@ int ump_test(const char* lib_path) {
 					double peak = 0;
 					const size_t bad = differ(out, ref, &first, &peak);
 					char what[256];
-					std::snprintf(what, sizeof what, "%s dialect, %s, %d Hz, host blocks %s: %llu frames (peak %.3f) bit for bit the component's x 0.25",
+					std::snprintf(what, sizeof what, "%s dialect, %s, %d Hz, host blocks %s: %llu frames (peak %.3f) bit for bit the component's",
 					    midi1 ? "MIDI (1.0)" : "MIDI2 (MIDI 2.0)", mono ? "mono" : "polyphonic", rate, blocks_name(block).c_str(),
 					    static_cast<unsigned long long>(frames), peak);
 					check(bad == 0 && peak > 0.001, what);
@@ -674,7 +674,7 @@ std::vector<Timed> clap_midi(const std::vector<expressive::Event>& perf) {
 void expect_ref(const std::vector<float>& out, const std::vector<float>& ref, const std::string& what) {
 	const expressive::Diff d = expressive::differ(out, ref);
 	char line[400];
-	std::snprintf(line, sizeof line, "%s: %zu frames (peak %.3f) bit for bit awva_render --ftz --ump's x 0.25", what.c_str(), ref.size(), d.peak);
+	std::snprintf(line, sizeof line, "%s: %zu frames (peak %.3f) bit for bit awva_render --ftz --ump's", what.c_str(), ref.size(), d.peak);
 	check(!ref.empty() && d.bad == 0 && d.peak > 0.001, line);
 	if (d.bad) std::printf("     %zu frames differ, the first at %zu, by up to %.3g (%.1f dBFS)\n", d.bad, d.first, d.max_diff, 20 * std::log10(d.max_diff + 1e-300));
 }

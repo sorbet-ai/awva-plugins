@@ -15,7 +15,7 @@
 //     the tuning and brightness note expressions, and mpe as VST3 notes with the channels' bend,
 //     pressure and CC74 as the parameter changes of their MIDI controllers (IMidiMapping), as a
 //     VST3 host plays MPE. Each must equal awva_render --ftz --ump's render of its UMP stream
-//     (DIR/ref_per_note_RATE.f32, DIR/ref_mpe_vst3_RATE.f32) x 0.25, bit for bit.
+//     (DIR/ref_per_note_RATE.f32, DIR/ref_mpe_vst3_RATE.f32), bit for bit.
 //   vst3_host_test bench PLUGIN.vst3 VOICES
 //     As clap_host_test bench, through the VST3: "bench vst3 N LOAD%" for 1, 4 and VOICES (the
 //     plugin's voices) notes, and "latency vst3 REPORTED MIN MAX".
@@ -309,7 +309,7 @@ bool same_bits(const std::vector<float>& a, const std::vector<float>& b) {
 void expect_ref(const std::vector<float>& out, const std::vector<float>& ref, const std::string& what) {
 	const expressive::Diff d = expressive::differ(out, ref);
 	char line[400];
-	std::snprintf(line, sizeof line, "%s: %zu frames (peak %.3f) bit for bit awva_render --ftz --ump's x 0.25", what.c_str(), ref.size(), d.peak);
+	std::snprintf(line, sizeof line, "%s: %zu frames (peak %.3f) bit for bit awva_render --ftz --ump's", what.c_str(), ref.size(), d.peak);
 	check(!ref.empty() && d.bad == 0 && d.peak > 0.001, line);
 	if (d.bad) std::printf("     %zu frames differ, the first at %zu, by up to %.3g (%.1f dBFS)\n", d.bad, d.first, d.max_diff, 20 * std::log10(d.max_diff + 1e-300));
 }

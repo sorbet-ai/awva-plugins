@@ -36,7 +36,7 @@
 // component's load_preset) through preset-load. State: the sound as an awva-preset/1 file (the
 // component's save_preset), with the plugin's own beside it in one more key ("awva-plugin": the
 // output level, mono, the factory preset it started from), which a preset reader skips.
-// Output: stereo (a mono engine on both channels), x0.25 (awva_render's WAV scaling), subnormals flushed.
+// Output: stereo (a mono engine on both channels), at unity (awva's output is nominal +-1), subnormals flushed.
 // Editor: the awva app's screen drawn natively (src/editor, app/DESIGN.md): the presets, the hero
 // knobs, every parameter, mono, the theme. Its changes reach the host as CLAP gestures and values
 // (the next process() or params flush puts them out and applies them), as a host's would.
@@ -64,7 +64,6 @@
 
 namespace {
 
-constexpr float kGain = 0.25f;  // unity (awva_render's WAV scaling: the engines run about +-4)
 constexpr int kMaxVoices = 10;  // (awva_render's default)
 constexpr clap_id kMonoId = 1; // (an engine parameter's id is FNV-1a of its name: never 1, the tests check)
 constexpr const char* kVendor = "Sorbet AI";
@@ -543,8 +542,8 @@ struct Plugin {
 				call_frame = i;
 				render_block();
 			}
-			l[i] = flush(buf[0][pos] * kGain);
-			r[i] = flush(buf[1][pos] * kGain);
+			l[i] = flush(buf[0][pos]);
+			r[i] = flush(buf[1][pos]);
 			pos++;
 		}
 	}
