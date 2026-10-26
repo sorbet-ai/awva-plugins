@@ -19,6 +19,8 @@ the release archive's licenses/ directory):
   2025 Steinberg Media Technologies GmbH, MIT. VST is a trademark of Steinberg Media
   Technologies GmbH.
 - The AudioUnitSDK 1.1.0 (the AU binaries), Copyright Apple Inc., Apache-2.0.
+- On Linux the binaries link the system's libX11 (MIT), cairo (LGPL-2.1 or MPL-1.1) and FreeType
+  (FreeType License or GPL-2.0) dynamically; none of them is in the archive.
 
 None of the binaries contains GPL code.
 

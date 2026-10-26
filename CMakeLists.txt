@@ -79,10 +79,16 @@ elseif(APPLE)
   list(APPEND AWVA_EDITOR_SOURCES src/editor/editor_mac.mm)
   set_source_files_properties(src/editor/editor_mac.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
   set(AWVA_EDITOR_LIBS "-framework Cocoa" "-framework CoreText" "-framework CoreGraphics" "-framework ImageIO")
+else() # Linux: X11, cairo, FreeType
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(AWVA_X11 REQUIRED IMPORTED_TARGET x11 cairo freetype2)
+  list(APPEND AWVA_EDITOR_SOURCES src/editor/editor_x11.cpp)
+  set(AWVA_EDITOR_LIBS PkgConfig::AWVA_X11)
 endif()
 
 # --- the generic plugin: CLAP and nsc.h only, compiled once --------------------------------------------
 add_library(awva_plugin_core OBJECT src/plugin.cpp ${AWVA_EDITOR_SOURCES})
+target_link_libraries(awva_plugin_core PUBLIC ${AWVA_EDITOR_LIBS}) # (Linux: its headers too)
 target_include_directories(awva_plugin_core PUBLIC "${CLAP_SDK_ROOT}/include" "${AWVA_DIR}/component/include" include src
   "${CLAP_WRAPPER_DIR}/include") # (clapwrapper/auv2.h: the AU codes; clapwrapper/vst3.h)
 target_compile_options(awva_plugin_core PRIVATE -Wall -Wextra -ffp-contract=off)
@@ -211,7 +217,8 @@ add_executable(vst3_host_test tests/vst3_host_test.cpp "${_vh}/module.cpp" "${_v
   "${_vh}/eventlist.cpp" "${_vh}/parameterchanges.cpp"
   "${VST3_SDK_ROOT}/public.sdk/source/vst/utility/stringconvert.cpp" "${VST3_SDK_ROOT}/public.sdk/source/common/commonstringconvert.cpp"
   "${VST3_SDK_ROOT}/public.sdk/source/vst/vstinitiids.cpp" "${VST3_SDK_ROOT}/pluginterfaces/base/funknown.cpp"
-  "${VST3_SDK_ROOT}/pluginterfaces/base/coreiids.cpp" $<IF:$<BOOL:${APPLE}>,${_vh}/module_mac.mm,${_vh}/module_win32.cpp>)
+  "${VST3_SDK_ROOT}/pluginterfaces/base/coreiids.cpp"
+  $<$<PLATFORM_ID:Darwin>:${_vh}/module_mac.mm> $<$<PLATFORM_ID:Windows>:${_vh}/module_win32.cpp> $<$<PLATFORM_ID:Linux>:${_vh}/module_linux.cpp>)
 target_include_directories(vst3_host_test PRIVATE "${VST3_SDK_ROOT}" "${AWVA_DIR}/component/include")
 set_target_properties(vst3_host_test PROPERTIES CXX_STANDARD 17)
 if(APPLE)

@@ -5,10 +5,10 @@
 [awva](https://github.com/sorbet-ai/awva) is a set of portable, expressive per-note sound engines. The same engine code runs on PCs and on embedded devices, and is played by MIDI 2.0 and MPE. awva-plugins brings the engines to DAWs: every engine as a CLAP, a VST3 and an Audio Unit (AUv2), also played by CLAP note expressions.
 
 - **Formats:**
-  - CLAP on Windows and macOS;
-  - VST3 on Windows and macOS;
+  - CLAP on Windows, macOS and Linux;
+  - VST3 on Windows, macOS and Linux;
   - AUv2 on macOS.
-- **Platforms:** Windows x64, and macOS 11 or later, universal (arm64 and x86_64).
+- **Platforms:** Windows x64; macOS 11 or later, universal (arm64 and x86_64); Linux x64 (built and tested on Ubuntu 24.04; it needs libX11, cairo and FreeType, which every desktop has).
 - **Input:** per-note expression in every format, by each format's own events (see [Expressive input](#expressive-input)):
   - CLAP: notes with per-note pressure, tuning and brightness expressions; MIDI 2.0 (UMP, the preferred dialect); MIDI 1.0 and MPE;
   - VST3: notes with poly pressure and the tuning and brightness note expressions; MPE through the MIDI controllers of all 16 channels;
@@ -17,13 +17,15 @@
   A note plays on its own MIDI channel, with its own id, so any number of notes can overlap. The engine's voice allocator takes over the oldest voice when it runs out. Each CLAP note gets one NOTE_END, when the engine hands the note back.
 - **Output:** stereo; a mono engine is on both channels.
 - **Editor:** the awva app's screen, drawn natively (Direct2D and DirectWrite on Windows, Core
-  Graphics and Core Text on macOS) to `app/DESIGN.md`: the presets, the hero knobs, every
+  Graphics and Core Text on macOS, an X11 window drawn with cairo and FreeType on Linux, run by the
+  host's event loop: CLAP posix-fd-support and timer-support) to `app/DESIGN.md`: the presets, the hero knobs, every
   parameter, mono, light and dark. Its changes reach the host as CLAP gestures and values (so a
   DAW records them as automation), through the VST3's and the AU's views as well (clap-wrapper).
   The design tokens are generated with the app's from one file (`app/design/tokens.json` ->
   `include/awva_plugin/design_tokens.h`); the font (DM Sans, OFL) and the logo are in the binary,
-  and nothing is installed. The theme follows the OS unless chosen in the editor, for every awva
-  plugin (`<app data>/awva/plugin-editor.json`). `ctest -R editor_shot` renders it offscreen in both
+  and nothing is installed. The theme follows the OS unless chosen in the editor (on Linux the
+  OS's is taken as light), for every awva plugin (`<app data>/awva/plugin-editor.json`;
+  Linux: `~/.config/awva/plugin-editor.json`). `ctest -R editor_shot` renders it offscreen in both
   themes (`build/editor_shots/`).
 - **Presets:** each engine's factory presets, in their order, in every format:
   - CLAP: preset-discovery, with the factory presets as the plugin's location, and preset-load;
@@ -103,6 +105,7 @@ A state from another engine, or text that isn't a preset, is refused.
 You need CMake 3.25 or later, Ninja, Python 3, git and, for the validators, Rust 1.95 or later, plus one of:
 - **Windows:** Visual Studio 2022 (its libraries) and LLVM clang.
 - **macOS:** Xcode and Homebrew's cmake and ninja.
+- **Linux:** clang, pkg-config and the X11, cairo and FreeType headers (Ubuntu: `ninja-build clang pkg-config libx11-dev libcairo2-dev libfreetype-dev`; `xvfb` to run the proofs and pluginval without a display). The app's core isn't built on Linux yet (`-DAWVA_APP=OFF`).
 
 ```
 git clone --recurse-submodules https://github.com/sorbet-ai/awva-plugins.git
@@ -197,11 +200,11 @@ Every engine runs 10 voices in under 4 % of one core, in every format. Each form
 
 **Latency:** every format reports 0 samples, since the plugin never delays its output. A Note On sounds at the engine's next 2 ms step, so 0 to 91 frames at 48 kHz, plus the engine's own onset (32 for modal, 64 for ep, about 150 for brass and trumpet). This is the same in every format.
 
-`./build.sh bench` makes the tables (`build/bench/table.md`). CI runs it on Windows and macOS as a regression check: every format must stay under 25 % of a core at 10 voices, and at most twice the bare component's load plus 0.5 %.
+`./build.sh bench` makes the tables (`build/bench/table.md`). CI runs it on Windows, macOS and Linux as a regression check: every format must stay under 25 % of a core at 10 voices, and at most twice the bare component's load plus 0.5 %.
 
 ## Validators
 
-The last run gave the same result on Windows and macOS:
+The last run gave the same result on Windows, macOS and Linux (pluginval and the editor's tests under Xvfb there; auval is macOS's):
 
 | engine | clap-validator (fork of 0.4.1), every test | pluginval 1.0.4, strictness 10 (VST3) | auval -strict (AU) |
 |---|---|---|---|
@@ -236,6 +239,7 @@ Until then, the macOS bundles are signed ad hoc, and macOS will quarantine them 
 A tag `v<version>` must match `project(... VERSION ...)` in `CMakeLists.txt`. It publishes a GitHub release with:
 - `awva-plugins-<version>-windows-x64.zip` (CLAP, VST3);
 - `awva-plugins-<version>-macos-universal.zip` (CLAP, VST3, AU);
+- `awva-plugins-<version>-linux-x64.zip` (CLAP, VST3);
 - `SHA256SUMS`.
 
 Each archive holds the licence texts in `licenses/`.

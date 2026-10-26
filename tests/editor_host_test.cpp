@@ -6,7 +6,8 @@
 // The CLAP gui extension: the API, the size, resizing to the minimum. On Windows the editor goes
 // into a hidden window and a knob is dragged with the mouse (window messages): the next process()
 // must give the host a gesture begin, the value and a gesture end for that parameter, and the
-// plugin must have the new value. On macOS: create and destroy (no window). Opens no audio device.
+// plugin must have the new value. On macOS and Linux: create and destroy (no window; Linux: an X
+// server, e.g. Xvfb). Opens no audio device.
 #if defined(_WIN32) && !defined(NOMINMAX)
 #define NOMINMAX
 #endif
@@ -111,8 +112,10 @@ int main(int argc, char** argv) {
 	if (!gui) return 1;
 #if defined(_WIN32)
 	const char* api = CLAP_WINDOW_API_WIN32;
-#else
+#elif defined(__APPLE__)
 	const char* api = CLAP_WINDOW_API_COCOA;
+#else
+	const char* api = CLAP_WINDOW_API_X11;
 #endif
 	check(gui->is_api_supported(p, api, false) && !gui->is_api_supported(p, api, true), std::string("embedded in the host's window (") + api + "), not floating");
 	p->activate(p, 48000, 1, 4096);

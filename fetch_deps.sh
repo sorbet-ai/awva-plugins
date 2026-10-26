@@ -99,8 +99,8 @@ if [ "${1:-}" = --validators ]; then
   macos)
     download pluginval-1.0.4-macos "$P/pluginval_macOS.zip" 3c4c533bda0c5059eea3ddaea752d757ee2025041f0f47e6bcb0e87f6082b29f
     ;;
-  *)
-    echo "fetch_deps.sh: the validators are fetched for Windows and macOS only" >&2
+  linux)
+    download pluginval-1.0.4-linux "$P/pluginval_Linux.zip" c01c49d8063965c4c2dea8324468336768f5c9139e0b1caebde14c2400b55352
     ;;
   esac
 fi

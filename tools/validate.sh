@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 Sorbet AI
 # SPDX-License-Identifier: Apache-2.0
 #
-# The validators on every built plugin, on this machine (Windows in Git Bash, or macOS), from
+# The validators on every built plugin, on this machine (Windows in Git Bash, macOS or Linux), from
 # ./fetch_deps.sh --validators:
 #   clap-validator       every test, on the .clap (Sorbet AI's fork of 0.4.1, built from the submodule
 #                        third_party/clap-validator: docs/forked_dependencies.md)
@@ -22,6 +22,11 @@ Darwin)
   CV="$HERE/deps/clap-validator/release/clap-validator"
   PV="$(find "$HERE"/deps/pluginval-1.0.4-macos -type f -path '*/Contents/MacOS/pluginval' | head -n 1)"
   mac=1
+  ;;
+Linux)
+  CV="$HERE/deps/clap-validator/release/clap-validator"
+  PV="$HERE/deps/pluginval-1.0.4-linux/pluginval"
+  mac=0
   ;;
 *)
   CV="$HERE/deps/clap-validator/release/clap-validator.exe"

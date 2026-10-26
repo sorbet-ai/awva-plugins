@@ -198,6 +198,8 @@ struct Plugin {
 	mutable std::vector<float> gui_val; // the editor's values not yet applied (NaN: none), main thread
 	std::unique_ptr<awva_editor::Editor> editor;
 	awva_editor::View* view = nullptr;
+	int gui_fd = -1;                    // (Linux: the view's fd, registered with the host)
+	clap_id gui_timer = CLAP_INVALID_ID; // (Linux: its timer)
 	double gui_scale = 1.0;
 	float gui_w_pt = static_cast<float>(awva_tokens::kEditorWidth), gui_h_pt = static_cast<float>(awva_tokens::kEditorHeight);
 	struct EditorHost;
@@ -607,9 +609,14 @@ std::string theme_file() {
 #if defined(_WIN32)
 	const char* base = std::getenv("APPDATA");
 	return base ? std::string(base) + "\\awva\\plugin-editor.json" : std::string();
-#else
+#elif defined(__APPLE__)
 	const char* home = std::getenv("HOME");
 	return home ? std::string(home) + "/Library/Application Support/awva/plugin-editor.json" : std::string();
+#else
+	const char* config = std::getenv("XDG_CONFIG_HOME");
+	const char* home = std::getenv("HOME");
+	if (config && *config) return std::string(config) + "/awva/plugin-editor.json";
+	return home ? std::string(home) + "/.config/awva/plugin-editor.json" : std::string();
 #endif
 }
 std::string read_theme() {
@@ -678,8 +685,8 @@ Plugin::~Plugin() {
 	free_regions();
 }
 
-// CLAP's sizes are pixels on Windows (the scale given by set_scale) and points on macOS
-#if defined(_WIN32)
+// CLAP's sizes are pixels on Windows and Linux (the scale given by set_scale) and points on macOS
+#if defined(_WIN32) || defined(__linux__)
 constexpr bool kGuiPixels = true;
 #else
 constexpr bool kGuiPixels = false;
@@ -696,10 +703,29 @@ bool gui_create(const clap_plugin* p, const char* api, bool floating) {
 	s.editor_host = std::make_unique<Plugin::EditorHost>(s);
 	s.editor = std::make_unique<awva_editor::Editor>(*s.editor_host);
 	s.view = awva_editor::view_create(*s.editor, *s.editor_host);
+#if defined(__linux__)
+	// the host runs the view: its X connection's fd and a 30 Hz timer
+	if (s.view) {
+		const auto* fd = static_cast<const clap_host_posix_fd_support*>(s.host->get_extension(s.host, CLAP_EXT_POSIX_FD_SUPPORT));
+		const auto* timer = static_cast<const clap_host_timer_support*>(s.host->get_extension(s.host, CLAP_EXT_TIMER_SUPPORT));
+		if (fd && fd->register_fd(s.host, awva_editor::view_fd(s.view), CLAP_POSIX_FD_READ)) s.gui_fd = awva_editor::view_fd(s.view);
+		if (!timer || !timer->register_timer(s.host, 33, &s.gui_timer)) s.gui_timer = CLAP_INVALID_ID;
+	}
+#endif
 	return s.view != nullptr;
 }
 void gui_destroy(const clap_plugin* p) {
 	Plugin& s = *self(p);
+#if defined(__linux__)
+	if (s.gui_fd >= 0)
+		if (const auto* fd = static_cast<const clap_host_posix_fd_support*>(s.host->get_extension(s.host, CLAP_EXT_POSIX_FD_SUPPORT)))
+			fd->unregister_fd(s.host, s.gui_fd);
+	if (s.gui_timer != CLAP_INVALID_ID)
+		if (const auto* timer = static_cast<const clap_host_timer_support*>(s.host->get_extension(s.host, CLAP_EXT_TIMER_SUPPORT)))
+			timer->unregister_timer(s.host, s.gui_timer);
+	s.gui_fd = -1;
+	s.gui_timer = CLAP_INVALID_ID;
+#endif
 	if (s.view) awva_editor::view_destroy(s.view);
 	s.view = nullptr;
 	s.editor.reset();
@@ -747,8 +773,10 @@ bool gui_set_parent(const clap_plugin* p, const clap_window* window) {
 	awva_editor::view_set_size(s.view, w, h);
 #if defined(_WIN32)
 	return awva_editor::view_attach(s.view, window->win32);
-#else
+#elif defined(__APPLE__)
 	return awva_editor::view_attach(s.view, window->cocoa);
+#else
+	return awva_editor::view_attach(s.view, reinterpret_cast<void*>(static_cast<uintptr_t>(window->x11)));
 #endif
 }
 bool gui_set_transient(const clap_plugin*, const clap_window*) { return false; }
@@ -763,6 +791,17 @@ bool gui_hide(const clap_plugin* p) {
 }
 const clap_plugin_gui kGui = {gui_supported, gui_preferred, gui_create, gui_destroy, gui_set_scale, gui_get_size, gui_can_resize,
     gui_resize_hints, gui_adjust_size, gui_set_size, gui_set_parent, gui_set_transient, gui_suggest_title, gui_show, gui_hide};
+#if defined(__linux__)
+// Linux: the host's event loop runs the editor (the X connection's fd, the 30 Hz timer)
+void on_fd(const clap_plugin* p, int, clap_posix_fd_flags_t) {
+	if (self(p)->view) awva_editor::view_on_fd(self(p)->view);
+}
+const clap_plugin_posix_fd_support kFdSupport = {on_fd};
+void on_timer(const clap_plugin* p, clap_id id) {
+	if (self(p)->view && id == self(p)->gui_timer) awva_editor::view_on_timer(self(p)->view);
+}
+const clap_plugin_timer_support kTimerSupport = {on_timer};
+#endif
 
 // --- extensions ----------------------------------------------------------------------------------
 uint32_t audio_count(const clap_plugin*, bool is_input) { return is_input ? 0 : 1; }
@@ -988,6 +1027,10 @@ const void* p_extension(const clap_plugin*, const char* id) {
 	if (!std::strcmp(id, CLAP_EXT_VOICE_INFO)) return &kVoiceInfo;
 	if (!std::strcmp(id, CLAP_EXT_TAIL)) return &kTail;
 	if (!std::strcmp(id, CLAP_EXT_GUI)) return &kGui;
+#if defined(__linux__)
+	if (!std::strcmp(id, CLAP_EXT_POSIX_FD_SUPPORT)) return &kFdSupport;
+	if (!std::strcmp(id, CLAP_EXT_TIMER_SUPPORT)) return &kTimerSupport;
+#endif
 	if (!std::strcmp(id, CLAP_EXT_PRESET_LOAD) || !std::strcmp(id, CLAP_EXT_PRESET_LOAD_COMPAT)) return &kPresetLoad;
 	if (!std::strcmp(id, AWVA_EXT_VOICE_CONTROLS)) return &kVoiceControls;
 	if (!std::strcmp(id, CLAP_PLUGIN_AS_VST3)) return &kAsVst3;

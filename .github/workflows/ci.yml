@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Sorbet AI
 # SPDX-License-Identifier: Apache-2.0
 #
-# awva-plugins CI, on Windows (x64) and macOS (universal):
+# awva-plugins CI, on Windows (x64), macOS (universal) and Linux (x64, the plugins: the job below):
 #   1. Fetch awva at AWVA_COMMIT, the dependencies and the validators (fetch_deps.sh: each pinned
 #      by commit or SHA-256; clap-wrapper and clap-validator are submodules, Sorbet AI's forks, and
 #      clap-validator is built from its source).
@@ -203,9 +203,57 @@ jobs:
           name: package-${{ matrix.platform }}
           path: ${{ steps.package.outputs.zip }}
 
+  # Linux (x64): the plugins (CLAP, VST3; the editor on X11), their proofs, validators and bench, and
+  # the release archive. The app's core joins with its Linux audio and MIDI (the app lane).
+  linux:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+      - name: tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ninja-build clang pkg-config libx11-dev libcairo2-dev libfreetype-dev xvfb
+          rustup toolchain install stable --profile minimal && rustup default stable
+      - name: dependencies
+        run: ./fetch_deps.sh --validators
+      - name: build
+        run: |
+          CC=clang CXX=clang++ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DAWVA_APP=OFF
+          cmake --build build
+      - name: bit-identity proofs
+        run: xvfb-run -a ctest --test-dir build -L plugin --output-on-failure -j 4
+      - name: CPU load and latency (the table and its regression check)
+        run: cmake --build build --target awva_bench
+      - name: bench table
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: bench-linux-x64
+          path: build/bench/
+      - name: validators
+        run: xvfb-run -a tools/validate.sh
+      - name: validator logs
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: validate-linux-x64
+          path: build/validate/
+      - name: package
+        id: package
+        run: echo "zip=$(tools/package.sh linux-x64)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: package-linux-x64
+          path: ${{ steps.package.outputs.zip }}
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, linux]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

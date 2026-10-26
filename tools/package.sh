@@ -41,6 +41,6 @@ if [ "$(uname -s)" = Darwin ]; then cp "$D/AudioUnitSDK-1.1.0/LICENSE.txt" "$L/A
 if [ "$(uname -s)" = Darwin ]; then
   (cd "$HERE/dist" && ditto -c -k --keepParent "$name" "$name.zip")
 else
-  (cd "$HERE/dist" && python -I -m zipfile -c "$name.zip" "$name")
+  (cd "$HERE/dist" && "$(command -v python3 || command -v python)" -I -m zipfile -c "$name.zip" "$name")
 fi
 echo "dist/$name.zip"
