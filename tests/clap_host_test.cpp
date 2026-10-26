@@ -20,7 +20,7 @@
 //     the output must be awva_render --midi's REF (mono, unscaled) x 0.25, bit for bit.
 //   clap_host_test ump PLUGIN.clap COMPONENT_LIB
 //     A MIDI 2.0 performance (MIDI2 dialect) and a MIDI 1.0 one (MIDI dialect), polyphonic and
-//     legato, in host blocks of 256, 1, 33 and random sizes at 48 and 44.1 kHz, against the engine's
+//     mono, in host blocks of 256, 1, 33 and random sizes at 48 and 44.1 kHz, against the engine's
 //     own component library given the same UMP at the same frames, block by block: bit for bit
 //     (an event after its block was rendered goes to the next as a late event: plugin.cpp).
 //   clap_host_test notes PLUGIN.clap
@@ -192,7 +192,7 @@ struct Instance {
 		p->process(p, &pr);
 	}
 };
-constexpr clap_id kLegatoId = 1;
+constexpr clap_id kMonoId = 1;
 
 // timed events of a whole performance (any CLAP event type), played in host blocks
 struct Timed {
@@ -206,11 +206,11 @@ template <class E> void push(std::vector<Timed>& v, uint64_t frame, const E& e) 
 }
 
 // host blocks: n > 0 that many frames, 0 random 1..1024 (seeded)
-std::vector<float> play(const std::vector<Timed>& events, uint64_t frames, int block, double rate = 48000, bool legato = false,
+std::vector<float> play(const std::vector<Timed>& events, uint64_t frames, int block, double rate = 48000, bool mono = false,
     const awva_voice_source* source = nullptr, uint32_t seed = 1) {
 	Instance in;
 	if (!in.p) return {};
-	if (legato) in.set_param(kLegatoId, 1.0);
+	if (mono) in.set_param(kMonoId, 1.0);
 	if (source) {
 		const auto* vx = in.ext<awva_plugin_voice_controls>(AWVA_EXT_VOICE_CONTROLS);
 		if (!vx || !vx->set_source(in.p, source)) return {};
@@ -351,7 +351,7 @@ struct Ev {
 	uint32_t w0, w1;
 };
 // notes with velocities, pressure, bends, CC74, releases (the component tests' performance), and
-// four more notes that overlap, for legato
+// four more notes that overlap, for mono
 std::vector<Ev> ump_performance(int rate) {
 	std::vector<Ev> v;
 	const int keys[6] = {60, 64, 67, 72, 62, 65};
@@ -405,11 +405,11 @@ std::vector<Timed> as_clap(const std::vector<Ev>& perf, bool midi1) {
 	return v;
 }
 // the component library, block by block, each event at its frame
-std::vector<float> render_component(const nsc_component& c, const std::vector<Ev>& perf, uint64_t frames, int rate, int nv, bool legato) {
+std::vector<float> render_component(const nsc_component& c, const std::vector<Ev>& perf, uint64_t frames, int rate, int nv, bool mono) {
 	nsc_instance in;
 	if (nsc_instance_new(&c, &in) != 0) return {};
 	if (c.init(in.state, in.fast, in.large, rate, nv) != 0) return {};
-	if (legato) (void)c.mode(in.state, NSC_MODE_LEGATO, 1);
+	if (mono) (void)c.mode(in.state, NSC_MODE_LEGATO, 1);
 	std::vector<float> out;
 	size_t k = 0;
 	float buf[2][NSC_BLOCK];
@@ -439,16 +439,16 @@ int ump_test(const char* lib_path) {
 		for (const bool midi1 : {false, true}) {
 			const std::vector<Ev> perf = midi1 ? midi1_performance(rate) : ump_performance(rate);
 			const std::vector<Timed> events = as_clap(perf, midi1);
-			for (const bool legato : {false, true}) {
-				const std::vector<float> ref = render_component(c, perf, frames, rate, nv, legato);
+			for (const bool mono : {false, true}) {
+				const std::vector<float> ref = render_component(c, perf, frames, rate, nv, mono);
 				for (const int block : {256, 1, 33, 0}) {
-					const std::vector<float> out = play(events, frames, block, rate, legato);
+					const std::vector<float> out = play(events, frames, block, rate, mono);
 					size_t first = 0;
 					double peak = 0;
 					const size_t bad = differ(out, ref, &first, &peak);
 					char what[256];
 					std::snprintf(what, sizeof what, "%s dialect, %s, %d Hz, host blocks %s: %llu frames (peak %.3f) bit for bit the component's x 0.25",
-					    midi1 ? "MIDI (1.0)" : "MIDI2 (MIDI 2.0)", legato ? "legato" : "polyphonic", rate, blocks_name(block).c_str(),
+					    midi1 ? "MIDI (1.0)" : "MIDI2 (MIDI 2.0)", mono ? "mono" : "polyphonic", rate, blocks_name(block).c_str(),
 					    static_cast<unsigned long long>(frames), peak);
 					check(bad == 0 && peak > 0.001, what);
 					if (bad) std::printf("     %zu frames differ, the first at %zu\n", bad, first);
@@ -490,7 +490,7 @@ std::vector<Timed> clap_performance(bool midi2, bool expressions) {
 						if (x == 0) w0 = 0x40000000u | (0xa0u | ch) << 16 | static_cast<uint32_t>(keys[n]) << 8, w1 = static_cast<uint32_t>(c);
 						if (x == 1) w0 = 0x40000000u | (0x00u | ch) << 16 | static_cast<uint32_t>(keys[n]) << 8 | 3,
 						            w1 = static_cast<uint32_t>((keys[n] + values[1]) * 33554432.0);
-						if (x == 2) w0 = 0x40000000u | (0x10u | ch) << 16 | static_cast<uint32_t>(keys[n]) << 8 | 4, w1 = static_cast<uint32_t>(c);
+						if (x == 2) w0 = 0x40000000u | (0x00u | ch) << 16 | static_cast<uint32_t>(keys[n]) << 8 | 74, w1 = static_cast<uint32_t>(c);
 						clap_event_midi2 e = {{sizeof e, 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI2, 0}, 0, {w0, w1, 0, 0}};
 						push(v, t, e);
 					} else {
@@ -894,7 +894,7 @@ std::vector<float> phrase(const std::function<void(Instance&)>& setup, Buffer* s
 	return out;
 }
 
-// random values for every parameter (inactive: through flush), legato among them
+// random values for every parameter (inactive: through flush), mono among them
 void randomize(Instance& in, uint32_t seed) {
 	const auto* pa = in.ext<clap_plugin_params>(CLAP_EXT_PARAMS);
 	std::mt19937 rng(seed);
@@ -1039,15 +1039,15 @@ int info_test(const char* lib_path, const char* preset_dir) {
 			params->get_value(in.p, pi.id, &v);
 			match = match && pi.default_value == static_cast<double>(q.def) && static_cast<float>(v) == q.def;
 			match = match && pi.id == q.id && std::string(pi.name) == q.name && pi.min_value == q.min && pi.max_value == q.max &&
-			    ((pi.flags & CLAP_PARAM_IS_STEPPED) != 0) == (q.kind != NSC_PARAM_CONTINUOUS) && pi.id != kLegatoId && pi.id != CLAP_INVALID_ID;
+			    ((pi.flags & CLAP_PARAM_IS_STEPPED) != 0) == (q.kind != NSC_PARAM_CONTINUOUS) && pi.id != kMonoId && pi.id != CLAP_INVALID_ID;
 		} else {
-			match = match && pi.id == kLegatoId && std::string(pi.name) == "legato";
+			match = match && pi.id == kMonoId && std::string(pi.name) == "mono";
 		}
 	}
 	bool unique = true;
 	for (size_t i = 0; i < ids.size(); i++)
 		for (size_t j = 0; j < i; j++) unique = unique && ids[i] != ids[j];
-	check(match && unique, std::to_string(nd.num_params) + " parameters as the component's (ids, names, ranges, kinds, defaults: def, the value after init), and legato; ids unique");
+	check(match && unique, std::to_string(nd.num_params) + " parameters as the component's (ids, names, ranges, kinds, defaults: def, the value after init), and mono; ids unique");
 	std::vector<std::string> presets;
 	const int listed = list_presets(&presets);
 	bool names = listed == nd.num_presets;

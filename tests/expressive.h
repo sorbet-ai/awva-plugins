@@ -11,8 +11,8 @@
 //              velocities 16-bit, pressures and brightnesses k/1024 (exact in a VST3 float),
 //              tunings multiples of 15/4096 semitone (exact through VST3's 0..1 = -120..120 st).
 //              Its UMP: MIDI 2.0 Note On/Off (16-bit velocities), Poly Pressure, Registered
-//              Per-Note Controller 3 (Pitch 7.25: the key plus the tuning), Assignable Per-Note
-//              Controller 4 (brightness).
+//              Per-Note Controller 3 (Pitch 7.25: the key plus the tuning), Registered Per-Note
+//              Controller 74 (brightness).
 //   mpe        MPE: the bend range (RPN 0) set to 12 on a member channel, five notes on member
 //              channels 2 .. 6 with 7-bit velocities, and each channel's pitch bend (14-bit),
 //              channel pressure and CC74, and the master channel's bend. Its UMP: MIDI 1.0 (type 2).
@@ -189,7 +189,7 @@ inline std::vector<Packet> ump(const std::vector<Event>& perf, bool vst3 = false
 		case kTuning:
 			u.push_back({e.frame, midi2(0x00, e.channel, e.key, 3), static_cast<uint32_t>((e.key + semitones(e)) * 33554432.0)});
 			break;
-		case kBrightness: u.push_back({e.frame, midi2(0x10, e.channel, e.key, 4), u32_of(unit(e))}); break;
+		case kBrightness: u.push_back({e.frame, midi2(0x00, e.channel, e.key, 74), u32_of(unit(e))}); break;
 		case kBend:
 			u.push_back({e.frame, midi1(0xe0, e.channel, static_cast<uint8_t>(e.value & 0x7f), static_cast<uint8_t>(e.value >> 7)), 0});
 			break;

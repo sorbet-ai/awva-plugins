@@ -8,8 +8,8 @@
 //
 //   header   the logo, the engine's title, the preset picker (previous, the name, next), the theme
 //   body     the sound's name, the engine's summary, the hero knobs four to a row, "Every parameter"
-//            (grouped slider rows, then legato); the body scrolls
-//   footer   the voices playing, legato
+//            (grouped slider rows, then mono); the body scrolls
+//   footer   the voices playing, mono
 //   menu     the presets, over the body
 #pragma once
 
@@ -54,8 +54,8 @@ struct Host {
 	virtual void set(int index, float v) = 0;
 	virtual void end(int index) = 0;
 	virtual void select_preset(int index) = 0;
-	virtual bool legato() const = 0;
-	virtual void set_legato(bool on) = 0;
+	virtual bool mono() const = 0;
+	virtual void set_mono(bool on) = 0;
 	virtual int voices() const = 0;
 	virtual std::string theme() const = 0; // "system", "light", "dark"
 	virtual void set_theme(const std::string& t) = 0;
@@ -83,7 +83,7 @@ public:
 	void show_menu(bool on) { menu_ = on; }
 
 private:
-	enum class Hit { None, Prev, Next, Preset, Theme, Knob, Toggle, All, Slider, Legato, MenuItem, Menu };
+	enum class Hit { None, Prev, Next, Preset, Theme, Knob, Toggle, All, Slider, Mono, MenuItem, Menu };
 	struct Target {
 		Hit kind = Hit::None;
 		Rect r;
@@ -114,7 +114,7 @@ private:
 	// what was last painted, to know when to paint again
 	std::vector<float> seen_;
 	int seen_preset_ = -2, seen_voices_ = -1;
-	bool seen_legato_ = false, seen_dark_ = false;
+	bool seen_mono_ = false, seen_dark_ = false;
 };
 
 } // namespace awva_editor

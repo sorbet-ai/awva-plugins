@@ -35,8 +35,8 @@ struct ShotHost : Host {
 	void set(int i, float v) override { c.set_param(in.state, i, v); }
 	void end(int) override {}
 	void select_preset(int i) override { c.set_preset(in.state, i); }
-	bool legato() const override { return false; }
-	void set_legato(bool) override {}
+	bool mono() const override { return false; }
+	void set_mono(bool) override {}
 	int voices() const override { return 3; }
 	std::string theme() const override { return th; }
 	void set_theme(const std::string& t) override { th = t; }

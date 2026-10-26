@@ -9,7 +9,7 @@
 //     The AU asks for MIDI 2.0 (kAudioUnitProperty_AudioUnitMIDIProtocol). The expressive
 //     performances (tests/expressive.h), in render cycles of 128, 1, 33 and random sizes up to
 //     1024: per_note as MIDI 2.0 (MusicDeviceMIDIEventList, protocol 2.0: Note On/Off, Poly
-//     Pressure, Registered Per-Note Controller 3, Assignable Per-Note Controller 4), mpe as MIDI
+//     Pressure, Registered Per-Note Controllers 3 and 74), mpe as MIDI
 //     1.0 (MusicDeviceMIDIEvent) and as MIDI 1.0 event lists (protocol 1.0), which the system
 //     gives the AU translated to MIDI 2.0 (it asked for 2.0). Each must equal awva_render --ftz
 //     --ump's render of its UMP stream (DIR/ref_per_note_RATE.f32, and DIR/ref_mpe_midi2_RATE.f32:

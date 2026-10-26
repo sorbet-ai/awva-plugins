@@ -53,7 +53,7 @@ target_compile_options(awva_host_options INTERFACE -Wall -Wextra)
 enable_testing()
 set(AWVA_VERSION "${AWVA_COMMIT}") # (the components' version, nsc_desc.version: the pinned commit)
 add_subdirectory("${AWVA_DIR}/sdk" awva/sdk EXCLUDE_FROM_ALL) # (only what the plugins and proofs use is built)
-set(AWVA_PLUGIN_ENGINES "${AWVA_ENGINES}" CACHE STRING "the engines made into plugins (default: every one)")
+set(AWVA_PLUGIN_ENGINES "${AWVA_ENGINES}") # (every engine of the pinned awva: a new one is a plugin at the next configure)
 
 # --- clap-wrapper (the submodule): its functions only -------------------------------------------------
 set(CLAP_WRAPPER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/clap-wrapper")

@@ -249,12 +249,12 @@ void Editor::paint(Canvas& c, float w, float h) {
 		y += T::s4;
 		c.text("play", {bx, y, rw, T::typeMicro.line}, T::typeMicro, k.text3, Align::Left);
 		y += T::typeMicro.line + T::s1;
-		c.text("legato", {bx, y, 180, T::row}, T::typeBody, k.text2, Align::Left);
+		c.text("mono", {bx, y, 180, T::row}, T::typeBody, k.text2, Align::Left);
 		const Rect sw = {bx + 180, y + T::row / 2 - 9, 32, 18};
-		const bool on = h_.legato();
+		const bool on = h_.mono();
 		c.fill(sw, on ? k.sage : k.bg3, 9);
 		c.disc(on ? sw.x + 23 : sw.x + 9, sw.y + 9, 6, on ? k.onSage : k.text3);
-		targets_.push_back({Hit::Legato, sw, -1});
+		targets_.push_back({Hit::Mono, sw, -1});
 		y += T::row;
 	}
 	y += T::s6;
@@ -265,7 +265,7 @@ void Editor::paint(Canvas& c, float w, float h) {
 	const float fy = h - T::footer;
 	c.fill({0, fy, w, T::footer}, k.bg0);
 	char f[96];
-	std::snprintf(f, sizeof f, "%d voice%s playing%s", h_.voices(), h_.voices() == 1 ? "" : "s", h_.legato() ? " · legato" : "");
+	std::snprintf(f, sizeof f, "%d voice%s playing%s", h_.voices(), h_.voices() == 1 ? "" : "s", h_.mono() ? " · mono" : "");
 	c.disc(T::s4 + 3, fy + T::footer / 2, 3, h_.voices() > 0 ? k.blue : k.text3);
 	c.text(f, {T::s4 + 12, fy, w / 2, T::footer}, T::typeSmall, k.text3, Align::Left);
 	c.text(std::string("awva ") + (d.version ? d.version : ""), {w / 2, fy, w / 2 - T::s4, T::footer}, T::typeSmall, k.text3, Align::Right);
@@ -277,7 +277,7 @@ void Editor::paint(Canvas& c, float w, float h) {
 	for (int i = 0; i < d.num_params; i++) seen_[static_cast<size_t>(i)] = h_.value(i);
 	seen_preset_ = h_.preset();
 	seen_voices_ = h_.voices();
-	seen_legato_ = h_.legato();
+	seen_mono_ = h_.mono();
 	seen_dark_ = k.dark;
 }
 
@@ -323,8 +323,8 @@ bool Editor::mouse_down(float x, float y, bool, bool double_click) {
 	case Hit::All:
 		all_ = !all_;
 		return true;
-	case Hit::Legato:
-		h_.set_legato(!h_.legato());
+	case Hit::Mono:
+		h_.set_mono(!h_.mono());
 		return true;
 	case Hit::Toggle:
 		h_.begin(t.index);
@@ -402,7 +402,7 @@ bool Editor::wheel(float x, float y, float dy) {
 
 bool Editor::tick() {
 	const nsc_desc& d = h_.desc();
-	if (h_.preset() != seen_preset_ || h_.voices() != seen_voices_ || h_.legato() != seen_legato_ || colors().dark != seen_dark_) return true;
+	if (h_.preset() != seen_preset_ || h_.voices() != seen_voices_ || h_.mono() != seen_mono_ || colors().dark != seen_dark_) return true;
 	if (seen_.size() != static_cast<size_t>(d.num_params)) return true;
 	for (int i = 0; i < d.num_params; i++)
 		if (h_.value(i) != seen_[static_cast<size_t>(i)]) return true;

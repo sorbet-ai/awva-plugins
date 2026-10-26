@@ -18,7 +18,7 @@
 - **Output:** stereo; a mono engine is on both channels.
 - **Editor:** the awva app's screen, drawn natively (Direct2D and DirectWrite on Windows, Core
   Graphics and Core Text on macOS) to `app/DESIGN.md`: the presets, the hero knobs, every
-  parameter, legato, light and dark. Its changes reach the host as CLAP gestures and values (so a
+  parameter, mono, light and dark. Its changes reach the host as CLAP gestures and values (so a
   DAW records them as automation), through the VST3's and the AU's views as well (clap-wrapper).
   The design tokens are generated with the app's from one file (`app/design/tokens.json` ->
   `include/awva_plugin/design_tokens.h`); the font (DM Sans, OFL) and the logo are in the binary,
@@ -31,9 +31,9 @@
   - AU: its factory presets.
 
   A preset file (`awva-preset/1`, `.preset.json`, as in awva's `presets/`) loads through CLAP preset-load from its path.
-- **State:** a project saves the sound as an `awva-preset/1` file, and a project restores it exactly. It also stores the output level, legato and the factory preset the sound started from (see below).
+- **State:** a project saves the sound as an `awva-preset/1` file, and a project restores it exactly. It also stores the output level, mono and the factory preset the sound started from (see below).
 
-All the plugins come from one generic source, `src/plugin.cpp`, which sees only CLAP and awva's engine component ABI (`nsc/nsc.h`, ABI 2). Each engine's component is linked in, built by awva's `awva_add_component(<target> <engine> STATIC)`. The plugin takes everything it shows from the component's descriptor: the name, summary, parameters, factory presets, voices and tail. clap-wrapper makes the VST3 and the AU from the same code.
+All the plugins come from one generic source, `src/plugin.cpp`, which sees only CLAP and awva's engine component ABI (`nsc/nsc.h`, ABI 4). Each engine's component is linked in, built by awva's `awva_add_component(<target> <engine> STATIC)`. The plugin takes everything it shows from the component's descriptor: the name, summary, parameters, factory presets, voices and tail. clap-wrapper makes the VST3 and the AU from the same code.
 
 ## The standalone app
 
@@ -49,17 +49,20 @@ folder, so new builds of an engine can be played without rebuilding anything. Se
 | engine | name | what it is | parameters | factory presets | voices | AU subtype |
 |---|---|---|---|---|---|---|
 | accordion | Accordion | free-reed accordion: registers, musette tuning, reed chambers, cassotto, a shared bellows | 43 | 9 | 10 | Acco |
-| bowed | Bowed Strings | bowed strings: friction-driven waveguide strings, modal body, section | 39 | 9 | 10 | Bowe |
+| bowed | Bowed Strings | bowed strings: friction-driven waveguide strings, modal body, section | 38 | 9 | 10 | Bowe |
 | brass | Brass | brass: a lip source and a physical bore, bell, mutes | 44 | 9 | 10 | Bras |
+| clarinet | Clarinet | physical clarinets: a single reed on a cylindrical bore with register hole and tone-hole lattice, fitted to recordings | 46 | 2 | 10 | Clar |
+| doublereed | doublereed | physical double reeds: reed, conical bore and tone holes, a living player (oboe, cor anglais, bassoon) | 53 | 3 | 10 | Doub |
 | ep | Electric Piano | electric pianos: modal tines and reeds, pickups, damper | 26 | 14 | 10 | Ep__ |
-| modal | Modal | tuned percussion: banks of damped resonators, struck or rubbed | 21 | 6 | 10 | Moda |
+| flute | flute | physical flutes: an air jet on the edge of an open-open bore (flute, alto flute, piccolo) | 63 | 3 | 10 | Flut |
+| modal | Modal | tuned percussion: banks of damped resonators, struck or rubbed | 22 | 6 | 10 | Moda |
 | reed | Reed | single reed: clarinet to saxophone, one model, tilt morphs the bore | 1 | 0 | 10 | Reed |
 | sine | Sine | the minimal example engine: one sine per voice, level from pressure | 1 | 0 | 10 | Sine |
-| trumpet | Trumpet | physical trumpet: lips, mouthpiece and bore | 46 | 1 | 10 | Trum |
+| trumpet | Trumpet | physical trumpet: lips, mouthpiece and bore, played like the brass trumpet | 46 | 1 | 10 | Trum |
 | va | Virtual Analog | virtual analog: saw/pulse/sub oscillators, sync, ladder-style filter, envelopes | 56 | 8 | 10 | Va__ |
-| wind | Wind | woodwinds: reed and jet driven bores, cylindrical and conical | 37 | 9 | 10 | Wind |
+| wind | Wind | woodwinds: reed and jet driven bores, cylindrical and conical | 38 | 9 | 10 | Wind |
 
-The parameters are the engine's, plus the component's `output` level (0 to 2, default 1). Every plugin also has a `legato` parameter, which switches the engine to mono legato.
+The parameters are the engine's, plus the component's `output` level (0 to 2, default 1). Every plugin also has a `mono` parameter (id 1), which switches the engine to mono: one voice, its notes slurred.
 
 The name is the engine's title (`nsc_desc.name`); the id is its short name (`nsc_desc.id`).
 
@@ -76,11 +79,11 @@ The name is the engine's title (`nsc_desc.name`); the id is its short name (`nsc
 **The state.** A host's save and restore of the plugin use the sound as an `awva-preset/1` JSON file, as the component's `save_preset()` writes it: the engine, the title, the heroes, and every parameter by name. One more key holds the plugin's own settings, which a preset reader skips:
 
 ```json
-"awva-plugin": {"output": 1, "legato": false, "factory_preset": 3}
+"awva-plugin": {"output": 1, "mono": false, "factory_preset": 3}
 ```
 
 - `output` is the component's output level. It is not part of a preset.
-- `legato` is mono legato.
+- `mono` is the `mono` parameter (one voice).
 - `factory_preset` is the factory preset the sound started from, or -1 for none.
 
 **Restoring.**
@@ -124,7 +127,7 @@ tools/package.sh windows-x64      # or macos-universal: dist/awva-plugins-<versi
   - The proof runs it through the plugin by a private test extension, `com.sorbet-ai.awva.voice-controls/1`; a DAW never uses it.
   - The output must equal `awva_render --ftz`'s x 0.25, bit for bit, at host blocks of 256, 1, 33 and random sizes. `--ftz` runs each block with subnormals flushed, as the component does.
 - **midi:** a Standard MIDI File (MPE notes with bends, pressure and CC74, a master-channel note, the pedal) in the MIDI dialect, each event at its time rounded to the nearest frame. The output must equal `awva_render --ftz --midi`'s x 0.25, bit for bit, at 48 and 44.1 kHz and host blocks of 256, 1, 33 and random sizes. The plugin and the renderer take MIDI by the same integer-frame step rule.
-- **ump:** MIDI 2.0 and MIDI 1.0 input, polyphonic and legato, at 48 and 44.1 kHz and host blocks of 256, 1, 33 and random sizes. The output must equal, bit for bit, the engine's own component library given the same UMP at the same frames.
+- **ump:** MIDI 2.0 and MIDI 1.0 input, polyphonic and mono, at 48 and 44.1 kHz and host blocks of 256, 1, 33 and random sizes. The output must equal, bit for bit, the engine's own component library given the same UMP at the same frames.
 - **notes:** CLAP notes and expressions must give the same output as their MIDI 2.0 translation, whatever the host block size, with a NOTE_END for each note.
 - **many:** 20 overlapping CLAP notes, each with its own brightness:
   - every note sounds: without it, the output differs;
@@ -143,7 +146,7 @@ Each check also confirms that the per-note pressure, tuning and brightness each 
 
 | format | per-note | MPE | the UMP the engine gets |
 |---|---|---|---|
-| CLAP note expressions | notes; pressure, tuning, brightness expressions | (MIDI dialect) | MIDI 2.0 Note On/Off (16-bit velocity), Poly Pressure, Registered Per-Note Controller 3 (Pitch 7.25), Assignable Per-Note Controller 4 |
+| CLAP note expressions | notes; pressure, tuning, brightness expressions | (MIDI dialect) | MIDI 2.0 Note On/Off (16-bit velocity), Poly Pressure, Registered Per-Note Controllers 3 (Pitch 7.25) and 74 (brightness) |
 | CLAP MIDI2 (UMP) | the UMP as it is | the UMP as it is | the same |
 | CLAP MIDI / MIDI_MPE | (MPE) | MIDI 1.0 bytes | MIDI 1.0 in UMP |
 | VST3 | notes; poly pressure events; tuning and brightness note expressions | notes; each channel's pitch bend, channel pressure and CC74 as its MIDI controllers' parameter changes (IMidiMapping) | per-note as CLAP's; MPE: notes as MIDI 2.0, controllers as MIDI 1.0 |
@@ -202,7 +205,7 @@ The last run gave the same result on Windows and macOS:
 
 | engine | clap-validator (fork of 0.4.1), every test | pluginval 1.0.4, strictness 10 (VST3) | auval -strict (AU) |
 |---|---|---|---|
-| all 10 engines | pass | pass | pass |
+| all 13 engines | pass | pass | pass |
 
 clap-validator runs all its tests, the preset-discovery ones included. It is built from Sorbet AI's fork, and clap-wrapper is a fork too: [docs/forked_dependencies.md](docs/forked_dependencies.md) lists their changes. The plugins refuse sample rates outside the engines' own range (`min_rate` .. `max_rate`, 11.025 to 192 kHz), as CLAP allows; the validator skips those rates, and the info proof checks the range.
 

@@ -12,8 +12,8 @@
 //             1 .. 16, so a VST3 host's MPE, its notes and the MIDI controllers of their channels,
 //             plays as MPE), per note: Note On/Off with 16-bit velocity and the note's id
 //             (nsc_event.note_id); pressure -> Poly Pressure, tuning -> Registered Per-Note
-//             Controller 3 (Pitch 7.25, the absolute pitch), brightness -> Assignable Per-Note
-//             Controller 4 (the note's own timbre). Volume, pan, vibrato and expression aren't
+//             Controller 3 (Pitch 7.25, the absolute pitch), brightness -> Registered Per-Note
+//             Controller 74 (the note's own timbre, bipolar: 0.5 is its centre). Volume, pan, vibrato and expression aren't
 //             engine inputs. A NOTE_END comes when the component's ended() hands the note back
 //             (its tail passed, the engine went idle, or a newer note took its channel and key).
 //   MIDI      MIDI 1.0 bytes as MIDI 1.0 in UMP (type 2); MIDI_MPE the same
@@ -30,15 +30,15 @@
 // a 32-frame block) goes to the next block with its negative frame (a late event, nsc.h), so the
 // component takes it at its own step: any host block size gives the same samples, at any rate.
 // A parameter applies from the first block at or after its time.
-// Parameters: the component's, by its stable ids, plus "legato" (the component's mono legato).
+// Parameters: the component's, by its stable ids, plus "mono" (the component's mono mode, NSC_MODE_LEGATO: one voice, its notes slurred).
 // Presets: the factory presets through preset-discovery and preset-load (clap-wrapper makes them
 // the VST3's preset list and the AU's factory presets), and preset files (awva-preset/1, the
 // component's load_preset) through preset-load. State: the sound as an awva-preset/1 file (the
 // component's save_preset), with the plugin's own beside it in one more key ("awva-plugin": the
-// output level, legato, the factory preset it started from), which a preset reader skips.
+// output level, mono, the factory preset it started from), which a preset reader skips.
 // Output: stereo (a mono engine on both channels), x0.25 (awva_render's WAV scaling), subnormals flushed.
 // Editor: the awva app's screen drawn natively (src/editor, app/DESIGN.md): the presets, the hero
-// knobs, every parameter, legato, the theme. Its changes reach the host as CLAP gestures and values
+// knobs, every parameter, mono, the theme. Its changes reach the host as CLAP gestures and values
 // (the next process() or params flush puts them out and applies them), as a host's would.
 #include <clap/clap.h>
 
@@ -66,7 +66,7 @@ namespace {
 
 constexpr float kGain = 0.25f;  // unity (awva_render's WAV scaling: the engines run about +-4)
 constexpr int kMaxVoices = 10;  // (awva_render's default)
-constexpr clap_id kLegatoId = 1; // (an engine parameter's id is FNV-1a of its name: never 1, the tests check)
+constexpr clap_id kMonoId = 1; // (an engine parameter's id is FNV-1a of its name: never 1, the tests check)
 constexpr const char* kVendor = "Sorbet AI";
 constexpr const char* kVersion = "0.1.0";
 
@@ -138,7 +138,7 @@ struct Note {
 struct Pending {
 	std::atomic<int> st{0};
 	int preset = -1;            // -1: none
-	int legato = -1;            // -1: unchanged
+	int mono = -1;            // -1: unchanged
 	std::vector<float> values; // by index; NaN: unchanged
 };
 
@@ -151,7 +151,7 @@ struct Plugin {
 	int sr = 48000;
 	int nv;
 	bool active = false;
-	std::atomic<bool> legato{false};
+	std::atomic<bool> mono{false};
 
 	// time and output
 	uint64_t frame = 0;  // frames processed since activation
@@ -231,7 +231,7 @@ struct Plugin {
 		}
 	}
 
-	int index_of(clap_id id) const { return id == kLegatoId ? -1 : c.param_index(id); }
+	int index_of(clap_id id) const { return id == kMonoId ? -1 : c.param_index(id); }
 
 	void rescan_values() {
 		if (const auto* hp = static_cast<const clap_host_params*>(host->get_extension(host, CLAP_EXT_PARAMS)))
@@ -291,7 +291,7 @@ struct Plugin {
 				push(f, w0_of(0x00, ch, key, 3), static_cast<uint32_t>(pitch * 33554432.0));
 				break;
 			}
-			case CLAP_NOTE_EXPRESSION_BRIGHTNESS: push(f, w0_of(0x10, ch, key, 4), u32_of(e.value)); break;
+			case CLAP_NOTE_EXPRESSION_BRIGHTNESS: push(f, w0_of(0x00, ch, key, 74), u32_of(e.value)); break;
 			default: break; // volume, pan, vibrato, expression: not engine inputs
 			}
 		}
@@ -316,9 +316,9 @@ struct Plugin {
 	}
 	// a parameter change (the audio thread, or the main thread while inactive)
 	void param(const clap_event_param_value& e) {
-		if (e.param_id == kLegatoId) {
-			legato = e.value >= 0.5;
-			(void)c.mode(state, NSC_MODE_LEGATO, legato ? 1 : 0);
+		if (e.param_id == kMonoId) {
+			mono = e.value >= 0.5;
+			(void)c.mode(state, NSC_MODE_LEGATO, mono ? 1 : 0);
 			return;
 		}
 		const int i = index_of(e.param_id);
@@ -346,7 +346,7 @@ struct Plugin {
 	void apply(int preset, int leg, const std::vector<float>& values) {
 		if (preset >= 0 && preset < d.num_presets) c.set_preset(state, preset);
 		if (leg >= 0) {
-			legato = leg != 0;
+			mono = leg != 0;
 			(void)c.mode(state, NSC_MODE_LEGATO, leg);
 		}
 		for (int i = 0; i < d.num_params && i < static_cast<int>(values.size()); i++)
@@ -364,14 +364,14 @@ struct Plugin {
 			if ((s == 0 || s == 2) && pending.st.compare_exchange_weak(s, 1)) break;
 		}
 		pending.preset = preset;
-		pending.legato = leg;
+		pending.mono = leg;
 		for (size_t i = 0; i < pending.values.size(); i++) pending.values[i] = i < values.size() ? values[i] : NAN;
 		pending.st = 2;
 	}
 	void apply_pending() { // the audio thread
 		int s = 2;
 		if (!pending.st.compare_exchange_strong(s, 3)) return;
-		apply(pending.preset, pending.legato, pending.values);
+		apply(pending.preset, pending.mono, pending.values);
 		pending.st = 0;
 		rescan = true;
 		host->request_callback(host);
@@ -414,7 +414,7 @@ struct Plugin {
 			(void)c.load_preset(state, json.data(), static_cast<uint32_t>(json.size()), nullptr);
 			if (out_index >= 0) (void)c.set_param(state, out_index, output);
 			if (leg >= 0) {
-				legato = leg != 0;
+				mono = leg != 0;
 				(void)c.mode(state, NSC_MODE_LEGATO, leg);
 			}
 			rescan_values();
@@ -434,8 +434,8 @@ struct Plugin {
 		const size_t close = out.rfind('}');
 		if (n == 0 || close == std::string::npos) return {};
 		char extra[160];
-		std::snprintf(extra, sizeof extra, ",\n  \"awva-plugin\": {\"output\": %.9g, \"legato\": %s, \"factory_preset\": %d}\n",
-		    static_cast<double>(out_index >= 0 ? c.param(state, out_index) : 1.0f), legato ? "true" : "false", factory);
+		std::snprintf(extra, sizeof extra, ",\n  \"awva-plugin\": {\"output\": %.9g, \"mono\": %s, \"factory_preset\": %d}\n",
+		    static_cast<double>(out_index >= 0 ? c.param(state, out_index) : 1.0f), mono ? "true" : "false", factory);
 		size_t last = close; // (after the last value, before the closing brace)
 		while (last > 0 && (out[last - 1] == '\n' || out[last - 1] == ' ' || out[last - 1] == '\r')) last--;
 		return out.substr(0, last) + extra + out.substr(close);
@@ -446,7 +446,7 @@ struct Plugin {
 		const size_t at = s.rfind("\"awva-plugin\"");
 		if (at != std::string::npos) {
 			char lg[8] = {};
-			if (std::sscanf(s.c_str() + at, "\"awva-plugin\": {\"output\": %f, \"legato\": %7[a-z], \"factory_preset\": %d}", &output, lg, &fac) != 3)
+			if (std::sscanf(s.c_str() + at, "\"awva-plugin\": {\"output\": %f, \"mono\": %7[a-z], \"factory_preset\": %d}", &output, lg, &fac) != 3)
 				return false;
 			leg = !std::strcmp(lg, "true") ? 1 : 0;
 		}
@@ -576,13 +576,13 @@ struct Plugin {
 	bool activate(double rate) {
 		const int new_sr = static_cast<int>(std::lround(rate));
 		if (new_sr < d.min_rate || new_sr > d.max_rate) return false; // (the engine's rates: init() refuses others)
-		if (new_sr != sr) { // init at the new rate (nsc.h): the preset, the values and legato again
+		if (new_sr != sr) { // init at the new rate (nsc.h): the preset, the values and mono again
 			const int preset = c.preset(state);
 			std::vector<float> values(static_cast<size_t>(d.num_params));
 			for (int i = 0; i < d.num_params; i++) values[static_cast<size_t>(i)] = c.param(state, i);
 			if (c.init(state, fast, large, new_sr, nv) != 0) return false;
 			sr = new_sr;
-			apply(preset, legato ? 1 : 0, values);
+			apply(preset, mono ? 1 : 0, values);
 		} else {
 			c.reset(state);
 		}
@@ -653,12 +653,12 @@ struct Plugin::EditorHost : awva_editor::Host {
 		s.load_values(i, -1, {});
 		s.factory = i;
 	}
-	bool legato() const override { return s.legato.load(); }
-	void set_legato(bool on) override {
-		s.gui_push(CLAP_EVENT_PARAM_GESTURE_BEGIN, kLegatoId, 0);
-		s.gui_push(CLAP_EVENT_PARAM_VALUE, kLegatoId, on ? 1.0 : 0.0);
-		s.gui_push(CLAP_EVENT_PARAM_GESTURE_END, kLegatoId, 0);
-		if (!s.active) s.legato = on;
+	bool mono() const override { return s.mono.load(); }
+	void set_mono(bool on) override {
+		s.gui_push(CLAP_EVENT_PARAM_GESTURE_BEGIN, kMonoId, 0);
+		s.gui_push(CLAP_EVENT_PARAM_VALUE, kMonoId, on ? 1.0 : 0.0);
+		s.gui_push(CLAP_EVENT_PARAM_GESTURE_END, kMonoId, 0);
+		if (!s.active) s.mono = on;
 	}
 	int voices() const override { return s.active ? s.c.active_voices(s.state) : 0; }
 	std::string theme() const override { return th; }
@@ -794,10 +794,10 @@ bool params_info(const clap_plugin* p, uint32_t index, clap_param_info* info) {
 	const Plugin& s = *self(p);
 	std::memset(info, 0, sizeof *info);
 	const int i = static_cast<int>(index);
-	if (i == s.d.num_params) { // the last: mono legato
-		info->id = kLegatoId;
+	if (i == s.d.num_params) { // the last: mono
+		info->id = kMonoId;
 		info->flags = CLAP_PARAM_IS_AUTOMATABLE | CLAP_PARAM_IS_STEPPED;
-		std::snprintf(info->name, sizeof info->name, "legato");
+		std::snprintf(info->name, sizeof info->name, "mono");
 		std::snprintf(info->module, sizeof info->module, "play");
 		info->min_value = 0;
 		info->max_value = 1;
@@ -817,8 +817,8 @@ bool params_info(const clap_plugin* p, uint32_t index, clap_param_info* info) {
 }
 bool params_value(const clap_plugin* p, clap_id id, double* v) {
 	const Plugin& s = *self(p);
-	if (id == kLegatoId) {
-		*v = s.pending.st.load() == 2 && s.pending.legato >= 0 ? s.pending.legato : (s.legato ? 1.0 : 0.0);
+	if (id == kMonoId) {
+		*v = s.pending.st.load() == 2 && s.pending.mono >= 0 ? s.pending.mono : (s.mono ? 1.0 : 0.0);
 		return true;
 	}
 	const int i = s.index_of(id);
@@ -828,7 +828,7 @@ bool params_value(const clap_plugin* p, clap_id id, double* v) {
 }
 bool params_to_text(const clap_plugin* p, clap_id id, double v, char* out, uint32_t size) {
 	const Plugin& s = *self(p);
-	if (id == kLegatoId) {
+	if (id == kMonoId) {
 		std::snprintf(out, size, "%s", v >= 0.5 ? "on" : "off");
 		return true;
 	}
@@ -839,7 +839,7 @@ bool params_to_text(const clap_plugin* p, clap_id id, double v, char* out, uint3
 	return true;
 }
 bool params_from_text(const clap_plugin* p, clap_id id, const char* text, double* v) {
-	if (id == kLegatoId) {
+	if (id == kMonoId) {
 		if (!std::strcmp(text, "on") || !std::strcmp(text, "off")) {
 			*v = !std::strcmp(text, "on") ? 1.0 : 0.0;
 			return true;
@@ -930,7 +930,7 @@ bool preset_from_location(const clap_plugin* p, uint32_t kind, const char* locat
 		}
 	} else if (kind == CLAP_PRESET_DISCOVERY_LOCATION_FILE) {
 		const std::string text = read_file(location);
-		ok = !text.empty() && s.load_preset_text(text, s.output_now(), -1); // (the output level and legato kept)
+		ok = !text.empty() && s.load_preset_text(text, s.output_now(), -1); // (the output level and mono kept)
 		if (ok) s.factory = -1;
 	}
 	if (hl) {
@@ -967,7 +967,7 @@ void p_deactivate(const clap_plugin* p) {
 	s.active = false;
 	if (s.pending.st.load() == 2) { // a load the audio thread didn't get to
 		s.pending.st = 3;
-		s.apply(s.pending.preset, s.pending.legato, s.pending.values);
+		s.apply(s.pending.preset, s.pending.mono, s.pending.values);
 		s.pending.st = 0;
 		s.rescan_values();
 	}
