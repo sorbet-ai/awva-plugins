@@ -252,18 +252,17 @@ uint32_t plugin_voices() {
 // --- perf: the default scripted performance against awva_render ---------------------------------------
 struct PerfSource {
 	std::unique_ptr<awva::sdk::Player> player;
-	std::vector<awva::VoiceControls> vc;
-	awva::GlobalControls g = awva::globals_at_rest;
-	// as awva_render: the player's key signals, then track_key, then the engine
+	std::vector<awva::NoteControls> vc;
+	awva::InstrumentControls g = awva::instrument_at_rest;
+	// as awva_render: the player's controls, then the engine
 	static void block(void* ctx, uint64_t b, nsc_voice* out, int32_t nv, nsc_globals* g) {
 		auto& s = *static_cast<PerfSource*>(ctx);
 		s.player->block(static_cast<int>(b), s.vc.data(), s.g);
-		for (awva::VoiceControls& c : s.vc) awva::track_key(c);
 		std::memcpy(out, s.vc.data(), sizeof(nsc_voice) * static_cast<size_t>(std::min<int32_t>(nv, static_cast<int32_t>(s.vc.size()))));
 		std::memcpy(g, &s.g, sizeof *g);
 	}
 };
-static_assert(sizeof(nsc_voice) == sizeof(awva::VoiceControls) && sizeof(nsc_globals) == sizeof(awva::GlobalControls));
+static_assert(sizeof(nsc_voice) == sizeof(awva::NoteControls) && sizeof(nsc_globals) == sizeof(awva::InstrumentControls));
 
 int perf_test(const char* ref_path) {
 	std::vector<float> ref;
@@ -282,7 +281,7 @@ int perf_test(const char* ref_path) {
 			std::fprintf(stderr, "%s\n", err.c_str());
 			return 2;
 		}
-		s.vc.assign(static_cast<size_t>(nv), awva::voice_at_rest);
+		s.vc.assign(static_cast<size_t>(nv), awva::note_at_rest);
 		const awva_voice_source src = {&s, PerfSource::block};
 		const std::vector<float> out = play({}, ref.size(), block, 48000, false, &src);
 		size_t first = 0;
@@ -573,7 +572,7 @@ int many_test(const char* lib_path) {
 		std::fprintf(stderr, "clap_host_test: cannot load the component %s\n", lib_path);
 		return 2;
 	}
-	const bool reads_y = (lib.c->desc->inputs & (1u << 3)) != 0; // (engine.h in_tilt_y)
+	const bool reads_y = (lib.c->desc->inputs & (1u << 2)) != 0; // (engine.h in_timbre)
 	nsc_unload(&lib);
 	uint32_t tail = 0;
 	{

@@ -3,8 +3,8 @@
 #
 # The awva plugins: every awva engine component (awva/component, nsc.h) as a CLAP, and through
 # clap-wrapper as a VST3 (Windows, macOS) and an AUv2 (macOS), all from the one generic source
-# (src/plugin.cpp, which sees only nsc.h and CLAP). awva is consumed by path (AWVA_DIR: a tree with
-# dsp/ sdk/ component/ tools/harness/ third_party/doctest; default the AWVA_COMMIT export in deps/).
+# (src/plugin.cpp, which sees only nsc.h and CLAP). awva is the AWVA_COMMIT export in deps/ (fetch_deps.sh;
+# AWVA=<checkout> exports that checkout's commit): changing AWVA_COMMIT changes the tree a build uses.
 #
 #   awva_<engine>_impl     the generic plugin, with clap_entry, on the engine's component
 #                          (awva_<engine>_component: awva_add_component)
@@ -31,7 +31,8 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/AWVA_COMMIT" AWVA_COMMIT_FULL LIMIT_COUNT 1)
 string(SUBSTRING "${AWVA_COMMIT_FULL}" 0 7 AWVA_COMMIT)
-set(AWVA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/awva-${AWVA_COMMIT}" CACHE PATH "awva: dsp/ sdk/ component/ tools/harness/ third_party/doctest")
+set(AWVA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/awva-${AWVA_COMMIT}")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/AWVA_COMMIT")
 set(CLAP_SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/deps/clap-1.2.10" CACHE PATH "")
 set(VST3_SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/deps/vst3sdk-3.8.0" CACHE PATH "")
 set(AUDIOUNIT_SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/deps/AudioUnitSDK-1.1.0" CACHE PATH "")
