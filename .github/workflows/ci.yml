@@ -204,7 +204,9 @@ jobs:
           path: ${{ steps.package.outputs.zip }}
 
   # Linux (x64): the plugins (CLAP, VST3; the editor on X11), their proofs, validators and bench, and
-  # the release archive. The app's core joins with its Linux audio and MIDI (the app lane).
+  # the release archive; the app (ALSA audio and MIDI, the Flutter Linux runner): its core's checks,
+  # the Flutter tests, the app built, a smoke run with no audio device, no MIDI and no window, its
+  # archive.
   linux:
     runs-on: ubuntu-24.04
     defaults:
@@ -217,16 +219,49 @@ jobs:
       - name: tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq ninja-build clang pkg-config libx11-dev libcairo2-dev libfreetype-dev xvfb
+          sudo apt-get install -y -qq ninja-build clang pkg-config libx11-dev libcairo2-dev libfreetype-dev xvfb \
+            libasound2-dev libgtk-3-dev liblzma-dev
           rustup toolchain install stable --profile minimal && rustup default stable
       - name: dependencies
         run: ./fetch_deps.sh --validators
       - name: build
         run: |
-          CC=clang CXX=clang++ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DAWVA_APP=OFF
+          CC=clang CXX=clang++ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build
       - name: bit-identity proofs
         run: xvfb-run -a ctest --test-dir build -L plugin --output-on-failure -j 4
+      - name: app core checks
+        run: ctest --test-dir build -L app --output-on-failure -j 4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.41.2
+          channel: stable
+          cache: true
+      - name: app tests
+        working-directory: app
+        run: flutter test
+      - name: app build
+        working-directory: app
+        run: flutter build linux --release
+      - name: app smoke run (no audio device, no MIDI, no window)
+        working-directory: app
+        run: |
+          xvfb-run -a build/linux/x64/release/bundle/awva --no-audio --no-midi --hidden --exit-after 3 \
+            --probe-wav "$RUNNER_TEMP/probe.wav" --engines-dir "$RUNNER_TEMP/none"
+          test -s "$RUNNER_TEMP/probe.wav"
+      - name: app archive
+        id: app_package
+        working-directory: app
+        run: |
+          v="$(sed -n 's/^version: \([0-9.]*\).*/\1/p' pubspec.yaml)"
+          mkdir -p ../dist
+          z="dist/awva-app-$v-linux-x64.tar.gz"
+          tar -czf "../$z" -C build/linux/x64/release bundle
+          echo "zip=$z" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: app-linux-x64
+          path: ${{ steps.app_package.outputs.zip }}
       - name: CPU load and latency (the table and its regression check)
         run: cmake --build build --target awva_bench
       - name: bench table
