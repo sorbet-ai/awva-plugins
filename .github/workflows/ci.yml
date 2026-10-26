@@ -84,7 +84,15 @@ jobs:
               case "$archs" in *arm64*x86_64*|*x86_64*arm64*) ;; *) echo "not universal: $b"; exit 1 ;; esac
             done
           fi
-          "$exe" --no-audio --no-midi --hidden --exit-after 3 --probe-wav "$RUNNER_TEMP/probe.wav" --engines-dir "$RUNNER_TEMP/none"
+          run() { "$exe" --no-audio --no-midi "$@" --exit-after 3 --probe-wav "$RUNNER_TEMP/probe.wav" --engines-dir "$RUNNER_TEMP/none"; }
+          if ! run --hidden; then
+            if [ "$RUNNER_OS" = macOS ]; then # (where it stopped, for the log)
+              lldb --batch -o run -k "thread backtrace all" -k quit -- "$exe" --no-audio --no-midi --hidden --exit-after 3 \
+                --probe-wav "$RUNNER_TEMP/probe.wav" --engines-dir "$RUNNER_TEMP/none" 2>&1 | tail -150 || true
+              echo "--- without --hidden:"; run && echo "(passes without --hidden)" || true
+            fi
+            exit 1
+          fi
           test -s "$RUNNER_TEMP/probe.wav"
       - name: app archive
         id: app_package
