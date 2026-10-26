@@ -55,8 +55,8 @@ same design is what the plugins show in a DAW, drawn natively (`DESIGN.md`).
 
 An engine build ships as one file, `<id>-<slug>.awvapkg`. The same file is loaded by:
 - this app (its PC image);
-- the virtual board and the board (their own images, through the firmware's module store);
-- Striso Live, which sends it to them unchanged.
+- an embedded instrument and its virtual twin (their own images, through their firmware's module
+  store), to which a controller app sends it unchanged.
 
 The app reads them from:
 - Windows: `%APPDATA%\awva\engines\`
