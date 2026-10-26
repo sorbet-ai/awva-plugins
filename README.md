@@ -9,10 +9,12 @@
   - VST3 on Windows and macOS;
   - AUv2 on macOS.
 - **Platforms:** Windows x64, and macOS 11 or later, universal (arm64 and x86_64).
-- **Input:**
-  - CLAP notes with per-note pressure, tuning and brightness. All of them go to the engine on one MIDI 2.0 channel, each with its own id, so any number of notes can overlap. The engine's voice allocator takes over the oldest voice when it runs out. Each note gets one NOTE_END, when the engine hands the note back;
-  - MIDI 1.0 and MPE;
-  - MIDI 2.0 (UMP).
+- **Input:** per-note expression in every format, by each format's own events (see [Expressive input](#expressive-input)):
+  - CLAP: notes with per-note pressure, tuning and brightness expressions; MIDI 2.0 (UMP, the preferred dialect); MIDI 1.0 and MPE;
+  - VST3: notes with poly pressure and the tuning and brightness note expressions; MPE through the MIDI controllers of all 16 channels;
+  - AU: MIDI 2.0 (the AU asks its host for it); MIDI 1.0 and MPE, which the system hands the AU as MIDI 2.0.
+
+  A note plays on its own MIDI channel, with its own id, so any number of notes can overlap. The engine's voice allocator takes over the oldest voice when it runs out. Each CLAP note gets one NOTE_END, when the engine hands the note back.
 - **Output:** stereo; a mono engine is on both channels.
 - **Editor:** the awva app's screen, drawn natively (Direct2D and DirectWrite on Windows, Core
   Graphics and Core Text on macOS) to `app/DESIGN.md`: the presets, the hero knobs, every
@@ -109,14 +111,15 @@ tools/package.sh windows-x64      # or macos-universal: dist/awva-plugins-<versi
 
 **Dependencies:** `fetch_deps.sh` puts each one in its own directory under `deps/`. Each is checked against a pinned commit or SHA-256. awva itself is pinned by `AWVA_COMMIT`: a change in awva reaches the plugins only through a bump of that file. clap-wrapper and clap-validator are git submodules under `third_party/`, pinned to commits of Sorbet AI's forks ([docs/forked_dependencies.md](docs/forked_dependencies.md)). `fetch_deps.sh` checks them out and builds clap-validator from its source.
 
-**Proofs:** `ctest -L plugin` runs eight of them on each engine.
+**Proofs:** `ctest -L plugin` runs these on each engine.
 - **info:** the plugin matches its component: the same id, name, parameters and presets. It also checks:
   - the ports;
   - preset loading, by index and from each of awva's preset files, which give their factory preset's values bit for bit;
   - a state round trip, both active and inactive;
   - that a restored project is exact, in the four cases above.
 - **conformance:** awva's `awva_conformance`, the component ABI's conformance checks, one ctest per check (`plugin.<engine>.conformance.<check>`) (awva's `docs/conformance.md`), on the engine's component as the plugins build it: the same `awva_add_component`, here built as a loadable library. A component change that breaks the ABI contract fails this repository's CI too. The engines' known failures are awva's own (`sdk/tests/known_failures.cmake`), and they are reported as warnings, as they are in awva.
-- **vst3_presets:** a minimal VST3 host (the VST3 SDK's hosting module) reads the VST3's preset list. It must hold the factory presets, by name and in order.
+- **vst3_presets:** a minimal VST3 host (`tests/vst3_host_test.cpp`, the VST3 SDK's hosting module) reads the VST3's preset list. It must hold the factory presets, by name and in order.
+- **expressive.clap, .vst3, .au:** the same expressive performances through each format's own events, against awva_render's render of their UMP stream, bit for bit (see [Expressive input](#expressive-input)).
 - **perf:** the engine's default preset playing the awva SDK's default scripted performance.
   - The proof runs it through the plugin by a private test extension, `com.sorbet-ai.awva.voice-controls/1`; a DAW never uses it.
   - The output must equal `awva_render --ftz`'s x 0.25, bit for bit, at host blocks of 256, 1, 33 and random sizes. `--ftz` runs each block with subnormals flushed, as the component does.
@@ -129,6 +132,39 @@ tools/package.sh windows-x64      # or macos-universal: dist/awva-plugins-<versi
   - each note gets exactly one NOTE_END, with its id.
 
 None of the proofs or validators opens an audio device.
+
+## Expressive input
+
+The proof `plugin.<engine>.expressive.<format>` plays the same two performances (`tests/expressive.h`) through each format's own events. The output must equal, bit for bit and x 0.25, `awva_render --ftz --ump`'s render of the UMP stream that the format carries to the engine. It runs at 48 and 44.1 kHz, in host blocks of 128 (CLAP: 256), 1, 33 and random sizes.
+- **per-note:** five overlapping notes on three channels, two of them on the same key. Each has its own pressure, tuning and brightness, and every value is exact in every format.
+- **MPE:** the bend range set by RPN, five notes on member channels, each channel's pitch bend, pressure and CC74, and the master channel's bend.
+
+Each check also confirms that the per-note pressure, tuning and brightness each change the output. Brightness is checked for the engines that read timbre.
+
+| format | per-note | MPE | the UMP the engine gets |
+|---|---|---|---|
+| CLAP note expressions | notes; pressure, tuning, brightness expressions | (MIDI dialect) | MIDI 2.0 Note On/Off (16-bit velocity), Poly Pressure, Registered Per-Note Controller 3 (Pitch 7.25), Assignable Per-Note Controller 4 |
+| CLAP MIDI2 (UMP) | the UMP as it is | the UMP as it is | the same |
+| CLAP MIDI / MIDI_MPE | (MPE) | MIDI 1.0 bytes | MIDI 1.0 in UMP |
+| VST3 | notes; poly pressure events; tuning and brightness note expressions | notes; each channel's pitch bend, channel pressure and CC74 as its MIDI controllers' parameter changes (IMidiMapping) | per-note as CLAP's; MPE: notes as MIDI 2.0, controllers as MIDI 1.0 |
+| AU | MIDI 2.0 event lists | MIDI 1.0 (MusicDeviceMIDIEvent, or MIDI 1.0 event lists) | per-note as it is; MPE as the UMP spec's default MIDI 1.0 to 2.0 translation |
+
+**What a format can't carry exactly:**
+- **No format lacks a per-note dimension.** Each one carries per-note pressure, pitch and timbre: through note expressions (CLAP, VST3), MIDI 2.0 per-note messages (CLAP, AU), or MPE channels (every format).
+- **VST3 MPE velocities:** VST3 notes carry 32-bit float velocities, so the engine gets an MPE note's velocity as MIDI 2.0's 16 bits, not MIDI 1.0's 7. The physical models are chaotic, so this tiny change gives a different waveform: up to -65 dBFS from the MIDI 1.0 path (brass), -72 dBFS for bowed, and -98 to -106 dBFS for the others. It is not a different sound.
+- **VST3 MIDI controllers:** clap-wrapper turns a host block's parameter changes into MIDI by their last point. So a channel's bend, pressure or CC74 changes at most once per host block, at that point's frame.
+- **VST3 per-note values** are float32 (pressure) or double (note expressions). The proofs' values are exact in both; a host's arbitrary value is rounded to float32 before the 32-bit MIDI 2.0 word.
+- **AU MIDI 1.0:** the AU asks for MIDI 2.0, so the system translates MIDI 1.0 (min-center-max scaling, the RPN as a Registered Controller). The engine then hears MPE at MIDI 2.0's resolution, not as the MIDI 1.0 bytes.
+
+## Performance
+
+CPU load as a % of one core, at 48 kHz in host blocks of 128. The workload is 1 / 4 / 10 notes held, each with its pressure, tuning and brightness moving every 10 ms, and each figure is the best of 5 runs of 4 s. "component" is the bare engine component given the same UMP; the formats' extra cost over it is the wrapper's.
+
+BENCH_TABLES
+
+**Latency:** every format reports 0 samples, since the plugin never delays its output. A Note On sounds at the engine's next 2 ms step, so 0 to 91 frames at 48 kHz, plus the engine's own onset (32 for modal, 64 for ep, about 150 for brass and trumpet). This is the same in every format.
+
+`./build.sh bench` makes the tables (`build/bench/table.md`). CI runs it on Windows and macOS as a regression check: every format must stay under 25 % of a core at 10 voices, and at most twice the bare component's load plus 0.5 %.
 
 ## Validators
 

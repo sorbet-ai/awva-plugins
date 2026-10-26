@@ -8,15 +8,22 @@
 // the sample rates. clap-wrapper makes the same code a VST3 and an AUv2.
 //
 // Notes, every dialect as UMP into the component (its decoder, up-converter, voice allocator):
-//   CLAP      every note on one channel (MIDI channel 2, an MPE member channel) as MIDI 2.0,
-//             per note: Note On/Off with 16-bit velocity and the note's id (nsc_event.note_id);
-//             pressure -> Poly Pressure, tuning -> Registered Per-Note Controller 3 (Pitch 7.25,
-//             the absolute pitch), brightness -> Assignable Per-Note Controller 4 (the note's own
-//             y). Volume, pan, vibrato and expression aren't engine inputs. A NOTE_END comes when
-//             the component's ended() hands the note back (its tail passed, the engine went
-//             idle, or a newer note took its key).
+//   CLAP      every note as MIDI 2.0 on its own channel (CLAP's channel 0 .. 15 is MIDI channel
+//             1 .. 16, so a VST3 host's MPE, its notes and the MIDI controllers of their channels,
+//             plays as MPE), per note: Note On/Off with 16-bit velocity and the note's id
+//             (nsc_event.note_id); pressure -> Poly Pressure, tuning -> Registered Per-Note
+//             Controller 3 (Pitch 7.25, the absolute pitch), brightness -> Assignable Per-Note
+//             Controller 4 (the note's own timbre). Volume, pan, vibrato and expression aren't
+//             engine inputs. A NOTE_END comes when the component's ended() hands the note back
+//             (its tail passed, the engine went idle, or a newer note took its channel and key).
 //   MIDI      MIDI 1.0 bytes as MIDI 1.0 in UMP (type 2); MIDI_MPE the same
-//   MIDI2     UMP as it comes (types 4 and 2 play, the component ignores the others)
+//   MIDI2     UMP as it comes (types 4 and 2 play, the component ignores the others). The
+//             preferred dialect: clap-wrapper's AU then asks its host for MIDI 2.0, and gives
+//             MIDI 1.0 to the plugin as MIDI (not as CLAP notes, whose bends it fixes at +-2)
+// VST3 (clap-wrapper): notes and their expressions as CLAP notes (poly pressure -> pressure, and
+// the tuning and brightness note expressions, which the clap.plugin-info-as-vst3 extension
+// declares), and the MIDI controllers of the 16 channels (IMidiMapping: pitch bend, channel
+// pressure, CCs) as MIDI 1.0.
 // Time: the component renders 32-frame blocks and takes its events in 2 ms steps on an integer
 // frame grid (nsc.h). A block is rendered when its first frame is due, with every event queued
 // for its frames; an event that arrives after its block was rendered (a host block ending inside
@@ -51,6 +58,7 @@
 #include "awva_plugin/voice_controls.h"
 #include "editor/view.h"
 #include "clapwrapper/auv2.h"
+#include "clapwrapper/vst3.h"
 #include "nsc/nsc.h"
 
 
@@ -122,9 +130,8 @@ struct Note {
 	bool superseded = false; // a newer note took its key: its note-off and expressions don't go out
 	int32_t token = -1;      // its id in the component (nsc_event.note_id; ours, as a host's may be -1)
 	int32_t id = -1;
-	int16_t port = 0, channel = 0, key = 0; // as the host named it
+	int16_t port = 0, channel = 0, key = 0; // as the host named it (channel: its MIDI channel too)
 };
-constexpr uint8_t kChannel = 1; // every CLAP note's MIDI channel (index 1: MIDI channel 2)
 
 // a preset or a state loaded on the main thread while the plugin is active: the audio thread
 // applies it before its next block. st: 0 free, 1 being written, 2 ready, 3 being applied
@@ -254,35 +261,37 @@ struct Plugin {
 	}
 	void note_on(uint64_t f, const clap_event_note& e) {
 		if (e.key < 0 || e.key > 127) return;
+		const int16_t channel = e.channel >= 0 && e.channel < 16 ? e.channel : 0;
 		Note* slot = nullptr;
 		for (Note& n : notes) {
-			if (n.used && n.held && n.key == e.key) n.superseded = true; // (its key is the new note's now)
+			if (n.used && n.held && n.channel == channel && n.key == e.key) n.superseded = true; // (its channel and key are the new note's now)
 			if (!slot && !n.used) slot = &n;
 		}
 		if (!slot) return; // (128 notes not yet ended: dropped)
-		*slot = {true, true, false, next_token, e.note_id, e.port_index, e.channel, e.key};
+		*slot = {true, true, false, next_token, e.note_id, e.port_index, channel, e.key};
 		next_token = (next_token + 1) & 0x7fffffff;
-		push(f, w0_of(0x90, kChannel, static_cast<uint8_t>(e.key), 0), u16_of(e.velocity) << 16, 0, 0, slot->token);
+		push(f, w0_of(0x90, static_cast<uint8_t>(channel), static_cast<uint8_t>(e.key), 0), u16_of(e.velocity) << 16, 0, 0, slot->token);
 	}
 	void note_off(uint64_t f, const clap_event_note& e) {
 		for (Note& n : notes) {
 			if (!matches(n, e.note_id, e.port_index, e.channel, e.key)) continue;
 			n.held = false;
-			if (!n.superseded) push(f, w0_of(0x80, kChannel, static_cast<uint8_t>(n.key), 0), u16_of(e.velocity) << 16);
+			if (!n.superseded)
+				push(f, w0_of(0x80, static_cast<uint8_t>(n.channel), static_cast<uint8_t>(n.key), 0), u16_of(e.velocity) << 16);
 		}
 	}
 	void expression(uint64_t f, const clap_event_note_expression& e) {
 		for (Note& n : notes) {
 			if (!matches(n, e.note_id, e.port_index, e.channel, e.key) || n.superseded) continue;
-			const uint8_t key = static_cast<uint8_t>(n.key);
+			const uint8_t ch = static_cast<uint8_t>(n.channel), key = static_cast<uint8_t>(n.key);
 			switch (e.expression_id) {
-			case CLAP_NOTE_EXPRESSION_PRESSURE: push(f, w0_of(0xa0, kChannel, key, 0), u32_of(e.value)); break;
+			case CLAP_NOTE_EXPRESSION_PRESSURE: push(f, w0_of(0xa0, ch, key, 0), u32_of(e.value)); break;
 			case CLAP_NOTE_EXPRESSION_TUNING: { // Pitch 7.25: the note's absolute pitch, semitones
 				const double pitch = std::clamp(static_cast<double>(n.key) + e.value, 0.0, 127.99999);
-				push(f, w0_of(0x00, kChannel, key, 3), static_cast<uint32_t>(pitch * 33554432.0));
+				push(f, w0_of(0x00, ch, key, 3), static_cast<uint32_t>(pitch * 33554432.0));
 				break;
 			}
-			case CLAP_NOTE_EXPRESSION_BRIGHTNESS: push(f, w0_of(0x10, kChannel, key, 4), u32_of(e.value)); break;
+			case CLAP_NOTE_EXPRESSION_BRIGHTNESS: push(f, w0_of(0x10, ch, key, 4), u32_of(e.value)); break;
 			default: break; // volume, pan, vibrato, expression: not engine inputs
 			}
 		}
@@ -774,7 +783,7 @@ bool note_get(const clap_plugin*, uint32_t index, bool is_input, clap_note_port_
 	if (!is_input || index != 0) return false;
 	info->id = 0;
 	info->supported_dialects = CLAP_NOTE_DIALECT_CLAP | CLAP_NOTE_DIALECT_MIDI | CLAP_NOTE_DIALECT_MIDI_MPE | CLAP_NOTE_DIALECT_MIDI2;
-	info->preferred_dialect = CLAP_NOTE_DIALECT_CLAP;
+	info->preferred_dialect = CLAP_NOTE_DIALECT_MIDI2;
 	std::snprintf(info->name, sizeof info->name, "Notes");
 	return true;
 }
@@ -941,6 +950,14 @@ bool set_source(const clap_plugin* p, const awva_voice_source* src) {
 }
 const awva_plugin_voice_controls kVoiceControls = {set_source};
 
+// clap-wrapper's VST3: the MIDI controllers of all 16 channels (IMidiMapping), and the note
+// expressions the engines take: poly pressure, tuning and brightness
+uint32_t vst3_channels(const clap_plugin*, uint32_t) { return 16; }
+uint32_t vst3_expressions(const clap_plugin*) {
+	return AS_VST3_NOTE_EXPRESSION_PRESSURE | AS_VST3_NOTE_EXPRESSION_TUNING | AS_VST3_NOTE_EXPRESSION_BRIGHTNESS;
+}
+const clap_plugin_as_vst3 kAsVst3 = {vst3_channels, vst3_expressions};
+
 // --- the plugin ----------------------------------------------------------------------------------
 bool p_init(const clap_plugin*) { return true; }
 void p_destroy(const clap_plugin* p) { delete self(p); }
@@ -973,6 +990,7 @@ const void* p_extension(const clap_plugin*, const char* id) {
 	if (!std::strcmp(id, CLAP_EXT_GUI)) return &kGui;
 	if (!std::strcmp(id, CLAP_EXT_PRESET_LOAD) || !std::strcmp(id, CLAP_EXT_PRESET_LOAD_COMPAT)) return &kPresetLoad;
 	if (!std::strcmp(id, AWVA_EXT_VOICE_CONTROLS)) return &kVoiceControls;
+	if (!std::strcmp(id, CLAP_PLUGIN_AS_VST3)) return &kAsVst3;
 	return nullptr;
 }
 void p_main_thread(const clap_plugin* p) {

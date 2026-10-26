@@ -6,7 +6,8 @@
 #      by commit or SHA-256; clap-wrapper and clap-validator are submodules, Sorbet AI's forks, and
 #      clap-validator is built from its source).
 #   2. Build every engine as CLAP, VST3 and (macOS) AU.
-#   3. The bit-identity proofs (ctest -L plugin).
+#   3. The bit-identity proofs (ctest -L plugin), and the CPU load and latency table with its check
+#      (./build.sh bench: every format under 25 % of a core at 10 voices, at most twice the component).
 #   4. clap-validator, pluginval at strictness 10 on the VST3, and on macOS auval -strict, with the
 #      AU installed in the runner's ~/Library for the run.
 #   5. The release archive of the platform.
@@ -61,6 +62,14 @@ jobs:
         run: ./build.sh build
       - name: bit-identity proofs
         run: ./build.sh test -j 4
+      - name: CPU load and latency (the table and its regression check)
+        run: ./build.sh bench
+      - name: bench table
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: bench-${{ matrix.platform }}
+          path: build/bench/
       - name: app core checks
         run: ctest --test-dir build -L app --output-on-failure -j 4
       - uses: subosito/flutter-action@v2

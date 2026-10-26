@@ -12,11 +12,14 @@
 #   awva_<engine>_clap     awva_<engine>.clap
 #   awva_<engine>_vst3     awva_<engine>.vst3
 #   awva_<engine>_auv2     awva_<engine>.component (macOS)
-#   clap_host_test         the CLI host the proofs run (tests/clap_host_test.cpp)
+#   clap_host_test         the CLI CLAP host the proofs run (tests/clap_host_test.cpp)
+#   vst3_host_test         the CLI VST3 host (tests/vst3_host_test.cpp); au_host_test the AU's (macOS)
 #   ctest -L plugin        per engine: info, the default performance bit for bit against awva_render,
 #                          UMP and MIDI 1.0 bit for bit against the engine's component library, CLAP notes,
 #                          20 overlapping CLAP notes (one NOTE_END each, per-note brightness), a MIDI
-#                          file bit for bit against awva_render --midi
+#                          file bit for bit against awva_render --midi, the expressive performances
+#                          through each format's own events bit for bit against awva_render --ump
+#   awva_bench             the CPU load and latency table of every engine and format (tools/bench.sh)
 cmake_minimum_required(VERSION 3.25)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>") # one runtime with clap-wrapper's
 set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "universal")
@@ -154,11 +157,13 @@ file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/au_codes.txt" "${_au}")
 # --- the proofs ------------------------------------------------------------------------------------------
 add_executable(make_test_midi tests/make_test_midi.cpp)
 target_link_libraries(make_test_midi PRIVATE awva_sdk)
+add_executable(make_expressive tests/make_expressive.cpp)
+target_compile_definitions(make_expressive PRIVATE $<$<PLATFORM_ID:Windows>:_CRT_SECURE_NO_WARNINGS>)
 add_executable(clap_host_test tests/clap_host_test.cpp)
 target_include_directories(clap_host_test PRIVATE "${CLAP_SDK_ROOT}/include" "${AWVA_DIR}/component/include" include)
 target_link_libraries(clap_host_test PRIVATE awva_sdk awva_performances ${CMAKE_DL_LIBS})
 target_compile_definitions(clap_host_test PRIVATE $<$<PLATFORM_ID:Windows>:_CRT_SECURE_NO_WARNINGS>)
-add_dependencies(clap_host_test awva_render nsc_components make_test_midi)
+add_dependencies(clap_host_test awva_render nsc_components make_test_midi make_expressive)
 
 # the component ABI's conformance (awva's awva_conformance, docs/conformance.md) on each engine's
 # component as the plugins build it: the same awva_add_component, here as a loadable library. A
@@ -199,23 +204,38 @@ foreach(v IN ITEMS bowed va)
   endif()
 endforeach()
 
-# vst3_programs: a minimal VST3 host (the VST3 SDK's hosting module) that reads the VST3's preset list
+# vst3_host_test: a minimal VST3 host (the VST3 SDK's hosting module): the preset list, the expressive
+# proof, the bench
 set(_vh "${VST3_SDK_ROOT}/public.sdk/source/vst/hosting")
-add_executable(vst3_programs tests/vst3_programs.cpp "${_vh}/module.cpp" "${_vh}/hostclasses.cpp" "${_vh}/pluginterfacesupport.cpp"
+add_executable(vst3_host_test tests/vst3_host_test.cpp "${_vh}/module.cpp" "${_vh}/hostclasses.cpp" "${_vh}/pluginterfacesupport.cpp"
+  "${_vh}/eventlist.cpp" "${_vh}/parameterchanges.cpp"
   "${VST3_SDK_ROOT}/public.sdk/source/vst/utility/stringconvert.cpp" "${VST3_SDK_ROOT}/public.sdk/source/common/commonstringconvert.cpp"
   "${VST3_SDK_ROOT}/public.sdk/source/vst/vstinitiids.cpp" "${VST3_SDK_ROOT}/pluginterfaces/base/funknown.cpp"
   "${VST3_SDK_ROOT}/pluginterfaces/base/coreiids.cpp" $<IF:$<BOOL:${APPLE}>,${_vh}/module_mac.mm,${_vh}/module_win32.cpp>)
-target_include_directories(vst3_programs PRIVATE "${VST3_SDK_ROOT}" "${AWVA_DIR}/component/include")
-set_target_properties(vst3_programs PROPERTIES CXX_STANDARD 17)
+target_include_directories(vst3_host_test PRIVATE "${VST3_SDK_ROOT}" "${AWVA_DIR}/component/include")
+set_target_properties(vst3_host_test PROPERTIES CXX_STANDARD 17)
 if(APPLE)
-  target_link_libraries(vst3_programs PRIVATE "-framework CoreFoundation" "-framework Foundation")
+  target_link_libraries(vst3_host_test PRIVATE "-framework CoreFoundation" "-framework Foundation")
   set_source_files_properties("${_vh}/module_mac.mm" PROPERTIES COMPILE_FLAGS "-fobjc-arc")
 else()
-  target_compile_definitions(vst3_programs PRIVATE _CRT_SECURE_NO_WARNINGS)
+  target_compile_definitions(vst3_host_test PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
+# au_host_test: a minimal AU host (AudioToolbox; the AU registered in this process only, never installed)
+if(APPLE)
+  add_executable(au_host_test tests/au_host_test.cpp)
+  target_include_directories(au_host_test PRIVATE "${AWVA_DIR}/component/include")
+  target_link_libraries(au_host_test PRIVATE "-framework AudioToolbox" "-framework CoreAudio" "-framework CoreMIDI"
+    "-framework CoreFoundation")
+endif()
+set(_xp -DOUT=${CMAKE_CURRENT_BINARY_DIR}/proof "-DRENDER=$<TARGET_FILE:awva_render>" "-DMAKE=$<TARGET_FILE:make_expressive>"
+  "-DCLAP_HOST=$<TARGET_FILE:clap_host_test>")
+set(_bench_cmds "")
 foreach(v IN LISTS AWVA_PLUGIN_ENGINES)
   add_dependencies(clap_host_test awva_${v}_clap)
-  add_dependencies(vst3_programs awva_${v}_vst3)
+  add_dependencies(vst3_host_test awva_${v}_vst3)
+  if(APPLE)
+    add_dependencies(au_host_test awva_${v}_auv2_signed)
+  endif()
   if(APPLE)
     set(_clap "$<TARGET_BUNDLE_DIR:awva_${v}_clap>")
   else()
@@ -238,10 +258,39 @@ foreach(v IN LISTS AWVA_PLUGIN_ENGINES)
   # (one ctest per check: plugin.<engine>.conformance.<check>)
   awva_conformance_tests("plugin.${v}.conformance." "$<TARGET_FILE:awva_${v}_conformance_lib>" KNOWN ${AWVA_KNOWN_${v}} ${AWVA_KNOWN_COMPONENT}
     LABELS "plugin;conformance")
-  add_test(NAME plugin.${v}.vst3_presets COMMAND vst3_programs "${CMAKE_BINARY_DIR}/awva_${v}.vst3" "${_lib}")
+  add_test(NAME plugin.${v}.vst3_presets COMMAND vst3_host_test programs "${CMAKE_BINARY_DIR}/awva_${v}.vst3" "${_lib}")
   add_test(NAME plugin.${v}.many COMMAND clap_host_test many "${_clap}" "${_lib}")
-  set_tests_properties(plugin.${v}.info plugin.${v}.perf plugin.${v}.ump plugin.${v}.notes plugin.${v}.many plugin.${v}.midi plugin.${v}.vst3_presets PROPERTIES LABELS plugin)
+  # the expressive performances through each format's own events, against awva_render --ump
+  set(_vst3 "${CMAKE_BINARY_DIR}/awva_${v}.vst3")
+  add_test(NAME plugin.${v}.expressive.clap COMMAND "${CMAKE_COMMAND}" -DENGINE=${v} -DFORMAT=clap ${_xp} "-DCLAP=${_clap}"
+    "-DHOST=$<TARGET_FILE:clap_host_test>" "-DPLUGIN=${_clap}" "-DLIB=${_lib}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressive_proof.cmake")
+  add_test(NAME plugin.${v}.expressive.vst3 COMMAND "${CMAKE_COMMAND}" -DENGINE=${v} -DFORMAT=vst3 ${_xp} "-DCLAP=${_clap}"
+    "-DHOST=$<TARGET_FILE:vst3_host_test>" "-DPLUGIN=${_vst3}" "-DLIB=${_lib}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressive_proof.cmake")
+  set(_expressive plugin.${v}.expressive.clap plugin.${v}.expressive.vst3)
+  set(_bench_au "")
+  if(APPLE)
+    set(_au "$<TARGET_BUNDLE_DIR:awva_${v}_auv2>")
+    add_test(NAME plugin.${v}.expressive.au COMMAND "${CMAKE_COMMAND}" -DENGINE=${v} -DFORMAT=au ${_xp} "-DCLAP=${_clap}"
+      "-DHOST=$<TARGET_FILE:au_host_test>" "-DPLUGIN=${_au}" "-DLIB=${_lib}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressive_proof.cmake")
+    list(APPEND _expressive plugin.${v}.expressive.au)
+    set(_bench_au "-DAU_HOST=$<TARGET_FILE:au_host_test>" "-DAU=${_au}")
+  endif()
+  set_tests_properties(plugin.${v}.info plugin.${v}.perf plugin.${v}.ump plugin.${v}.notes plugin.${v}.many plugin.${v}.midi plugin.${v}.vst3_presets
+    ${_expressive} PROPERTIES LABELS plugin)
+  list(APPEND _bench_cmds COMMAND "${CMAKE_COMMAND}" -DENGINE=${v} "-DCLAP_HOST=$<TARGET_FILE:clap_host_test>" "-DCLAP=${_clap}" "-DLIB=${_lib}"
+    "-DVST3_HOST=$<TARGET_FILE:vst3_host_test>" "-DVST3=${_vst3}" ${_bench_au} "-DOUT=${CMAKE_CURRENT_BINARY_DIR}/bench"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/bench.cmake")
 endforeach()
+# the CPU load and latency of every engine and format, one at a time (build/bench/<engine>.txt, and
+# the table: build/bench/table.md)
+string(REPLACE ";" "," _engines "${AWVA_PLUGIN_ENGINES}")
+add_custom_target(awva_bench ${_bench_cmds}
+  COMMAND "${CMAKE_COMMAND}" "-DOUT=${CMAKE_CURRENT_BINARY_DIR}/bench" "-DENGINES=${_engines}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/bench_table.cmake"
+  USES_TERMINAL VERBATIM)
+add_dependencies(awva_bench clap_host_test vst3_host_test)
+if(APPLE)
+  add_dependencies(awva_bench au_host_test)
+endif()
 
 # --- the standalone app's core (app/core: the Flutter app's engine, MIDI and audio) -----------------------
 option(AWVA_APP "build the standalone app's core (app/core)" ON)

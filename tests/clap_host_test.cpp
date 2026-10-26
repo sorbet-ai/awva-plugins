@@ -30,12 +30,25 @@
 //     A CLAP-dialect performance (notes with ids, pressure, tuning, brightness expressions):
 //     the same as its MIDI 2.0 translation, bit for bit; the same for every host block size; it
 //     sounds, the expressions change it, and a NOTE_END comes for every note.
+//   clap_host_test expressive PLUGIN.clap COMPONENT_LIB DIR RATE
+//     The expressive performances (tests/expressive.h) through every CLAP dialect, in host blocks
+//     of 256, 1, 33 and random sizes: per_note as CLAP notes with pressure, tuning and brightness
+//     expressions and as MIDI 2.0 (MIDI2 dialect), mpe as MIDI 1.0 (MIDI dialect). Each must equal
+//     awva_render --ftz --ump's render of its UMP stream (DIR/ref_<performance>_RATE.f32) x 0.25,
+//     bit for bit.
+//   clap_host_test bench PLUGIN.clap COMPONENT_LIB
+//     The CPU load at 48 kHz in host blocks of 128 (tests/expressive.h bench: 1, 4 and the plugin's
+//     voices held, their expressions moving), the plugin's and its bare component's (the same UMP
+//     into process()), the best of 5 runs of 4 s; and the latency: the plugin's reported latency
+//     and the frames from a Note On to the first sample that isn't 0, over 20 phases of the 2 ms
+//     step. Lines "bench clap|component VOICES LOAD%", "latency clap REPORTED MIN MAX".
 #if defined(_WIN32) && !defined(NOMINMAX)
 #define NOMINMAX // (nsc/load.h includes windows.h)
 #endif
 #include <clap/clap.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -51,6 +64,7 @@
 #include "awva_plugin/voice_controls.h"
 #include "awva_sdk/performance.h"
 #include "awva_sdk/smf.h"
+#include "expressive.h"
 #include "nsc/load.h"
 
 namespace {
@@ -452,7 +466,7 @@ std::vector<Timed> clap_performance(bool midi2, bool expressions) {
 	const int keys[3] = {55, 59, 62};
 	for (int n = 0; n < 3; n++) {
 		const uint64_t on = 4800 + 21000 * n + 37 * n, off = on + 60000;
-		const uint8_t ch = 1; // the plugin's one channel for CLAP notes: MIDI channel 2
+		const uint8_t ch = 0; // (the CLAP notes' channel: a CLAP note plays on its own MIDI channel)
 		const double vel = 0.5 + 0.2 * n;
 		if (midi2) {
 			const uint32_t v16 = static_cast<uint32_t>(vel * 65535.0 + 0.5);
@@ -598,6 +612,185 @@ int many_test(const char* lib_path) {
 	check(sound == 20, "every one of the 20 sounds: without it the output differs (" + std::to_string(sound) + " of 20)");
 	if (reads_y) check(own == 20, "every one's brightness is its own (per-note y, one channel): changing it changes the output (" + std::to_string(own) + " of 20)");
 	else std::printf("info the engine doesn't read y: brightness changes the output for %d of 20 notes\n", own);
+	return 0;
+}
+
+// --- expressive: the performances of tests/expressive.h through the CLAP dialects ------------------------
+// as CLAP notes with expressions (the channel messages, of mpe, as MIDI)
+std::vector<Timed> clap_notes(const std::vector<expressive::Event>& perf) {
+	using namespace expressive;
+	std::vector<Timed> v;
+	for (const Event& e : perf) {
+		const int16_t ch = e.channel, key = e.key;
+		switch (e.kind) {
+		case kNoteOn:
+		case kNoteOff: {
+			clap_event_note x = {{sizeof x, 0, CLAP_CORE_EVENT_SPACE_ID, static_cast<uint16_t>(e.kind == kNoteOn ? CLAP_EVENT_NOTE_ON : CLAP_EVENT_NOTE_OFF), 0},
+			    e.id, 0, ch, key, velocity(e)};
+			push(v, e.frame, x);
+			break;
+		}
+		case kPressure:
+		case kTuning:
+		case kBrightness: {
+			const clap_note_expression id = e.kind == kPressure ? CLAP_NOTE_EXPRESSION_PRESSURE
+			    : e.kind == kTuning                         ? CLAP_NOTE_EXPRESSION_TUNING
+			                                                : CLAP_NOTE_EXPRESSION_BRIGHTNESS;
+			clap_event_note_expression x = {{sizeof x, 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_NOTE_EXPRESSION, 0}, id, e.id, 0, ch, key,
+			    e.kind == kTuning ? semitones(e) : unit(e)};
+			push(v, e.frame, x);
+			break;
+		}
+		default: {
+			clap_event_midi x = {{sizeof x, 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI, 0}, 0, {}};
+			(void)bytes(e, x.data);
+			push(v, e.frame, x);
+			break;
+		}
+		}
+	}
+	return v;
+}
+// the UMP stream as MIDI 2.0 (MIDI2 dialect)
+std::vector<Timed> clap_ump(const std::vector<expressive::Packet>& u) {
+	std::vector<Timed> v;
+	for (const expressive::Packet& p : u) {
+		clap_event_midi2 x = {{sizeof x, 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI2, 0}, 0, {p.w0, p.w1, 0, 0}};
+		push(v, p.frame, x);
+	}
+	return v;
+}
+// a MIDI 1.0 performance as MIDI (MIDI dialect)
+std::vector<Timed> clap_midi(const std::vector<expressive::Event>& perf) {
+	std::vector<Timed> v;
+	for (const expressive::Event& e : perf) {
+		clap_event_midi x = {{sizeof x, 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI, 0}, 0, {}};
+		if (expressive::bytes(e, x.data)) push(v, e.frame, x);
+	}
+	return v;
+}
+// one comparison: the output against the reference, bit for bit
+void expect_ref(const std::vector<float>& out, const std::vector<float>& ref, const std::string& what) {
+	const expressive::Diff d = expressive::differ(out, ref);
+	char line[400];
+	std::snprintf(line, sizeof line, "%s: %zu frames (peak %.3f) bit for bit awva_render --ftz --ump's x 0.25", what.c_str(), ref.size(), d.peak);
+	check(!ref.empty() && d.bad == 0 && d.peak > 0.001, line);
+	if (d.bad) std::printf("     %zu frames differ, the first at %zu, by up to %.3g (%.1f dBFS)\n", d.bad, d.first, d.max_diff, 20 * std::log10(d.max_diff + 1e-300));
+}
+int expressive_test(const char* lib_path, const std::string& dir, int rate) {
+	nsc_library lib;
+	if (nsc_load(lib_path, &lib) != 0) {
+		std::fprintf(stderr, "clap_host_test: cannot load the component %s\n", lib_path);
+		return 2;
+	}
+	const bool reads_timbre = (lib.c->desc->inputs & (1u << 2)) != 0; // (engine.h in_timbre)
+	nsc_unload(&lib);
+	using namespace expressive;
+	const std::string r = std::to_string(rate);
+	const std::vector<float> ref_note = read_f32(dir + "/ref_per_note_" + r + ".f32"), ref_mpe = read_f32(dir + "/ref_mpe_" + r + ".f32");
+	if (ref_note.empty() || ref_mpe.empty()) {
+		std::fprintf(stderr, "clap_host_test: no references in %s (awva_render --ump)\n", dir.c_str());
+		return 2;
+	}
+	const std::vector<Event> note = per_note(rate), mp = mpe(rate);
+	const std::vector<Timed> as_notes = clap_notes(note), as_ump = clap_ump(ump(note)), as_midi = clap_midi(mp);
+	for (const int block : {256, 1, 33, 0}) {
+		const std::string b = std::to_string(rate) + " Hz, host blocks " + blocks_name(block);
+		expect_ref(play(as_notes, ref_note.size(), block, rate), ref_note, "per-note: CLAP notes, pressure, tuning, brightness expressions, " + b);
+		expect_ref(play(as_ump, ref_note.size(), block, rate), ref_note, "per-note: MIDI 2.0 (MIDI2 dialect), " + b);
+		expect_ref(play(as_midi, ref_mpe.size(), block, rate), ref_mpe, "MPE: MIDI 1.0 (MIDI dialect), " + b);
+	}
+	// (each dimension reaches the engine: without it the output differs)
+	for (const Kind k : {kPressure, kTuning, kBrightness}) {
+		std::vector<Event> without;
+		for (const Event& e : note)
+			if (e.kind != k) without.push_back(e);
+		const char* name = k == kPressure ? "pressure" : k == kTuning ? "tuning" : "brightness";
+		const bool differs = !same_bits(play(clap_notes(without), ref_note.size(), 256, rate), play(as_notes, ref_note.size(), 256, rate));
+		if (k != kBrightness || reads_timbre) check(differs, std::string("per-note: the ") + name + " expressions change the output");
+		else std::printf("info the engine doesn't read timbre: the brightness expressions %s the output\n", differs ? "change" : "don't change");
+	}
+	return 0;
+}
+
+// --- bench: the CPU load and the latency -------------------------------------------------------------------
+// seconds spent in process(), host blocks of `block`
+double play_timed(const std::vector<Timed>& events, uint64_t frames, uint32_t block, double rate) {
+	Instance in;
+	if (!in.p) return -1;
+	in.start(rate);
+	std::vector<float> l(block), r(block);
+	size_t k = 0;
+	Events ev;
+	double spent = 0;
+	for (uint64_t at = 0; at < frames; at += block) {
+		ev.clear();
+		for (; k < events.size() && events[k].frame < at + block; k++) {
+			ev.store.push_back(events[k].bytes);
+			reinterpret_cast<clap_event_header*>(ev.store.back().data())->time = static_cast<uint32_t>(events[k].frame - at);
+		}
+		const auto t0 = std::chrono::steady_clock::now();
+		in.process(at, block, ev, l.data(), r.data());
+		spent += std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+	}
+	return spent;
+}
+// the component alone, the same UMP in 32-frame blocks
+double component_timed(const nsc_component& c, const std::vector<expressive::Packet>& u, uint64_t frames, int rate, int nv) {
+	nsc_instance in;
+	if (nsc_instance_new(&c, &in) != 0 || c.init(in.state, in.fast, in.large, rate, nv) != 0) return -1;
+	size_t k = 0;
+	float buf[2][NSC_BLOCK];
+	float* o[2] = {buf[0], buf[1]};
+	std::vector<nsc_event> ev;
+	double spent = 0;
+	for (uint64_t b0 = 0; b0 < frames; b0 += NSC_BLOCK) {
+		ev.clear();
+		for (; k < u.size() && u[k].frame < b0 + NSC_BLOCK; k++) ev.push_back({static_cast<int32_t>(u[k].frame - b0), -1, {u[k].w0, u[k].w1, 0, 0}});
+		const auto t0 = std::chrono::steady_clock::now();
+		c.process(in.state, ev.data(), static_cast<int32_t>(ev.size()), o);
+		spent += std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+	}
+	nsc_instance_free(&in);
+	return spent;
+}
+int bench_test(const char* lib_path) {
+	nsc_library lib;
+	if (nsc_load(lib_path, &lib) != 0) {
+		std::fprintf(stderr, "clap_host_test: cannot load the component %s\n", lib_path);
+		return 2;
+	}
+	constexpr int rate = 48000;
+	constexpr double seconds = 4;
+	const int nv = static_cast<int>(plugin_voices());
+	const uint64_t frames = static_cast<uint64_t>(seconds * rate);
+	for (const int voices : {1, 4, nv}) {
+		const std::vector<expressive::Event> perf = expressive::bench(voices, rate, seconds);
+		const std::vector<Timed> events = clap_notes(perf);
+		const std::vector<expressive::Packet> u = expressive::ump(perf);
+		double best = 1e9, best_c = 1e9;
+		for (int run = 0; run < 5; run++) {
+			best = std::fmin(best, play_timed(events, frames, 128, rate));
+			best_c = std::fmin(best_c, component_timed(*lib.c, u, frames, rate, nv));
+		}
+		std::printf("bench clap %d %.2f\n", voices, 100 * best / seconds);
+		std::printf("bench component %d %.2f\n", voices, 100 * best_c / seconds);
+	}
+	nsc_unload(&lib);
+	// the latency: none reported (no latency extension), and the frames from a Note On to the sound
+	int64_t lo = 1 << 30, hi = -1;
+	for (int phase = 0; phase < 96; phase += 5) {
+		const uint64_t on = 4800 + static_cast<uint64_t>(phase);
+		const int64_t n = expressive::onset(play(clap_notes(expressive::one_note(on)), on + 4800, 128, rate), on);
+		if (n < 0) {
+			lo = n, hi = n;
+			break;
+		}
+		lo = std::min(lo, n), hi = std::max(hi, n);
+	}
+	Instance in;
+	const bool reports = in.ext<void>(CLAP_EXT_LATENCY) != nullptr;
+	std::printf("latency clap %s %lld %lld\n", reports ? "reported" : "0", static_cast<long long>(lo), static_cast<long long>(hi));
 	return 0;
 }
 
@@ -945,7 +1138,7 @@ int info_test(const char* lib_path, const char* preset_dir) {
 
 int main(int argc, char** argv) {
 	if (argc < 3) {
-		std::fprintf(stderr, "usage: clap_host_test info|voices|perf|ump|notes PLUGIN.clap [REF.f32 | COMPONENT_LIB]\n");
+		std::fprintf(stderr, "usage: clap_host_test info|voices|perf|midifile|ump|notes|many|expressive|bench PLUGIN.clap [...]\n");
 		return 2;
 	}
 	const std::string mode = argv[1];
@@ -967,6 +1160,8 @@ int main(int argc, char** argv) {
 	else if (mode == "midifile" && argc >= 5) rc = midifile_test(argv[3], argv[4], argc >= 6 ? std::atoi(argv[5]) : 48000);
 	else if (mode == "notes") rc = notes_test();
 	else if (mode == "many" && argc >= 4) rc = many_test(argv[3]);
+	else if (mode == "expressive" && argc >= 6) rc = expressive_test(argv[3], argv[4], std::atoi(argv[5]));
+	else if (mode == "bench" && argc >= 4) rc = bench_test(argv[3]);
 	else {
 		std::fprintf(stderr, "clap_host_test: unknown mode %s, or arguments missing\n", mode.c_str());
 		return 2;
