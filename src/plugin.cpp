@@ -24,9 +24,12 @@
 // component takes it at its own step: any host block size gives the same samples, at any rate.
 // A parameter applies from the first block at or after its time.
 // Parameters: the component's, by its stable ids, plus "legato" (the component's mono legato).
-// Presets: the factory presets through preset-discovery and preset-load. State: the preset, then
-// the values by id (nsc.h's rule: unknown ids dropped, values clamped). Output: stereo (a mono
-// engine on both channels), x0.25 as the board, subnormals flushed.
+// Presets: the factory presets through preset-discovery and preset-load (clap-wrapper makes them
+// the VST3's preset list and the AU's factory presets), and preset files (awva-preset/1, the
+// component's load_preset) through preset-load. State: the sound as an awva-preset/1 file (the
+// component's save_preset), with the plugin's own beside it in one more key ("awva-plugin": the
+// output level, legato, the factory preset it started from), which a preset reader skips.
+// Output: stereo (a mono engine on both channels), x0.25 as the board, subnormals flushed.
 #include <clap/clap.h>
 
 #include <algorithm>
@@ -171,11 +174,18 @@ struct Plugin {
 	Pending pending;
 	std::atomic<bool> rescan{false};
 
+	int factory = -1; // the factory preset the sound started from (preset-load, or a state); -1: none
+	int out_index = -1; // the component's "output" parameter (not a preset's: the state keeps it)
+	void *sx_state = nullptr, *sx_fast = nullptr, *sx_large = nullptr; // a scratch instance (main thread)
+
 	explicit Plugin(const clap_host* h) : host(h), nv(std::min(kMaxVoices, d.max_voices)) {
+		for (int i = 0; i < d.num_params; i++)
+			if (!std::strcmp(d.params[i].name, "output")) out_index = i;
 		state = region(d.state_bytes);
 		fast = region(d.fast_bytes);
 		large = region(d.large_bytes);
 		(void)c.init(state, fast, large, sr, nv); // (48 kHz: in every engine's range)
+		factory = c.preset(state); // (the preset init() leaves: the engine's default, -1 for none)
 		pending.values.assign(static_cast<size_t>(d.num_params), NAN);
 		vc.assign(static_cast<size_t>(nv), nsc_voice{});
 	}
@@ -183,6 +193,11 @@ struct Plugin {
 		region_free(state);
 		region_free(fast);
 		region_free(large);
+		if (sx_state) {
+			region_free(sx_state);
+			region_free(sx_fast);
+			region_free(sx_large);
+		}
 	}
 
 	int index_of(clap_id id) const { return id == kLegatoId ? -1 : c.param_index(id); }
@@ -337,52 +352,89 @@ struct Plugin {
 		return c.param(state, i);
 	}
 
-	std::string save() const {
-		char line[160];
-		std::snprintf(line, sizeof line, "awva-plugin 1\nengine %s\nschema %08x\npreset %d\nlegato %d\n", d.id,
-		    static_cast<unsigned>(d.schema_hash), c.preset(state), legato ? 1 : 0);
-		std::string s = line;
-		for (int i = 0; i < d.num_params; i++) {
-			const float v = c.param(state, i);
-			uint32_t bits;
-			std::memcpy(&bits, &v, 4);
-			std::snprintf(line, sizeof line, "param %08x %08x %s\n", static_cast<unsigned>(d.params[i].id), static_cast<unsigned>(bits),
-			    d.params[i].name);
-			s += line;
+	// a preset file's values (every parameter; output: keep_output), read into the scratch instance
+	// so the live one isn't touched: false if it isn't this engine's preset
+	bool read_preset(const std::string& json, float keep_output, std::vector<float>* values) {
+		if (!sx_state) {
+			sx_state = region(d.state_bytes);
+			sx_fast = region(d.fast_bytes);
+			sx_large = region(d.large_bytes);
 		}
-		return s;
+		if (c.init(sx_state, sx_fast, sx_large, sr, nv) != 0) return false;
+		if (c.load_preset(sx_state, json.data(), static_cast<uint32_t>(json.size()), nullptr) != 1) return false;
+		values->assign(static_cast<size_t>(d.num_params), 0.0f);
+		for (int i = 0; i < d.num_params; i++) (*values)[static_cast<size_t>(i)] = c.param(sx_state, i);
+		if (out_index >= 0) (*values)[static_cast<size_t>(out_index)] = keep_output;
+		return true;
+	}
+	// a preset file into the plugin (main thread): exactly as the component reads it while inactive,
+	// else its values by the audio thread before its next block
+	bool load_preset_text(const std::string& json, float output, int leg) {
+		std::vector<float> values;
+		if (!read_preset(json, output, &values)) return false;
+		if (!active) {
+			(void)c.load_preset(state, json.data(), static_cast<uint32_t>(json.size()), nullptr);
+			if (out_index >= 0) (void)c.set_param(state, out_index, output);
+			if (leg >= 0) {
+				legato = leg != 0;
+				(void)c.mode(state, NSC_MODE_LEGATO, leg);
+			}
+			rescan_values();
+			return true;
+		}
+		load_values(-1, leg, values);
+		return true;
+	}
+	float output_now() const { return out_index >= 0 ? static_cast<float>(value(out_index)) : 1.0f; }
+
+	// the state: the sound as the component writes it (awva-preset/1), and the plugin's own key
+	std::string save() const {
+		std::string out(16384, '\0');
+		const char* title = factory >= 0 && factory < d.num_presets ? d.presets[factory].name : d.name;
+		const uint32_t n = c.save_preset(state, title, out.data(), static_cast<uint32_t>(out.size()));
+		out.resize(n);
+		const size_t close = out.rfind('}');
+		if (n == 0 || close == std::string::npos) return {};
+		char extra[160];
+		std::snprintf(extra, sizeof extra, ",\n  \"awva-plugin\": {\"output\": %.9g, \"legato\": %s, \"factory_preset\": %d}\n",
+		    static_cast<double>(out_index >= 0 ? c.param(state, out_index) : 1.0f), legato ? "true" : "false", factory);
+		size_t last = close; // (after the last value, before the closing brace)
+		while (last > 0 && (out[last - 1] == '\n' || out[last - 1] == ' ' || out[last - 1] == '\r')) last--;
+		return out.substr(0, last) + extra + out.substr(close);
 	}
 	bool load(const std::string& s) {
-		if (s.rfind("awva-plugin 1\n", 0) != 0) return false;
-		int preset = -1, leg = -1;
-		std::vector<float> values(static_cast<size_t>(d.num_params), NAN);
-		size_t at = 0;
-		while (at < s.size()) {
-			const size_t end = s.find('\n', at);
-			const std::string line = s.substr(at, end == std::string::npos ? std::string::npos : end - at);
-			at = end == std::string::npos ? s.size() : end + 1;
-			const size_t sp = line.find(' '); // a line is a key, a space and its value
-			const std::string key = line.substr(0, sp);
-			const char* v = sp == std::string::npos ? "" : line.c_str() + sp + 1;
-			unsigned id = 0, bits = 0;
-			int n = 0;
-			if (key == "engine") {
-				if (std::strcmp(v, d.id) != 0) return false; // another engine's state
-			} else if (key == "preset" && std::sscanf(v, "%d", &n) == 1) {
-				preset = n;
-			} else if (key == "legato" && std::sscanf(v, "%d", &n) == 1) {
-				leg = n != 0 ? 1 : 0;
-			} else if (key == "param" && std::sscanf(v, "%x %x", &id, &bits) == 2) {
-				const int i = c.param_index(id); // (an id this engine doesn't have: dropped)
-				if (i < 0) continue;
-				float f;
-				const uint32_t b = bits;
-				std::memcpy(&f, &b, 4);
-				values[static_cast<size_t>(i)] = f;
-			}
-			// (schema: a different hash means a value may be out of its range now; set_param clamps it)
+		float output = 1.0f;
+		int leg = 0, fac = -1;
+		const size_t at = s.rfind("\"awva-plugin\"");
+		if (at != std::string::npos) {
+			char lg[8] = {};
+			if (std::sscanf(s.c_str() + at, "\"awva-plugin\": {\"output\": %f, \"legato\": %7[a-z], \"factory_preset\": %d}", &output, lg, &fac) != 3)
+				return false;
+			leg = !std::strcmp(lg, "true") ? 1 : 0;
 		}
-		load_values(preset, leg, values);
+		fac = fac >= 0 && fac < d.num_presets ? fac : -1;
+		// a sound made from a factory preset: restored the way it was made, the preset by its index
+		// (so the component has it as its preset again: its heroes, preset()) and then the values
+		// that differ from it, as edits after it
+		std::vector<float> values;
+		if (fac >= 0) {
+			if (!read_preset(s, output, &values)) return false; // (another engine's, or not a preset)
+			c.set_preset(sx_state, fac);
+			for (int i = 0; i < d.num_params; i++) {
+				const float a = c.param(sx_state, i), b = values[static_cast<size_t>(i)];
+				if (i != out_index && std::memcmp(&a, &b, sizeof a) == 0) values[static_cast<size_t>(i)] = NAN; // (the preset's own)
+			}
+			if (!active) {
+				apply(fac, leg, values);
+				rescan_values();
+			} else {
+				load_values(fac, leg, values);
+			}
+			factory = fac;
+			return true;
+		}
+		if (!load_preset_text(s, output, leg)) return false; // (another engine's, or not a preset)
+		factory = fac;
 		return true;
 	}
 
@@ -586,6 +638,7 @@ const clap_plugin_params kParams = {params_count, params_info, params_value, par
 
 bool state_save(const clap_plugin* p, const clap_ostream* os) {
 	const std::string s = self(p)->save();
+	if (s.empty()) return false;
 	size_t at = 0;
 	while (at < s.size()) {
 		const int64_t w = os->write(os, s.data() + at, s.size() - at);
@@ -623,19 +676,40 @@ uint32_t tail_get(const clap_plugin* p) {
 const clap_plugin_tail kTail = {tail_get};
 
 // presets: the factory presets, by index (preset-discovery below lists them)
+// a preset file's text (at most 1 MB): empty if it can't be read
+std::string read_file(const char* path) {
+	std::string t;
+	FILE* f = path ? std::fopen(path, "rb") : nullptr;
+	if (!f) return t;
+	char buf[4096];
+	size_t got;
+	while ((got = std::fread(buf, 1, sizeof buf, f)) > 0 && t.size() < (1u << 20)) t.append(buf, got);
+	std::fclose(f);
+	return t;
+}
+// presets: a factory preset by index (preset-discovery lists them), or a preset file by its path
 bool preset_from_location(const clap_plugin* p, uint32_t kind, const char* location, const char* key) {
 	Plugin& s = *self(p);
-	char* end = nullptr;
-	const long i = key ? std::strtol(key, &end, 10) : -1;
-	if (kind != CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN || !key || end == key || *end || i < 0 || i >= s.d.num_presets) {
-		if (const auto* hl = static_cast<const clap_host_preset_load*>(s.host->get_extension(s.host, CLAP_EXT_PRESET_LOAD)))
-			hl->on_error(s.host, kind, location, key, -1, "no such factory preset");
-		return false;
+	const auto* hl = static_cast<const clap_host_preset_load*>(s.host->get_extension(s.host, CLAP_EXT_PRESET_LOAD));
+	bool ok = false;
+	if (kind == CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN) {
+		char* end = nullptr;
+		const long i = key ? std::strtol(key, &end, 10) : -1;
+		if (key && end != key && !*end && i >= 0 && i < s.d.num_presets) {
+			s.load_values(static_cast<int>(i), -1, {});
+			s.factory = static_cast<int>(i);
+			ok = true;
+		}
+	} else if (kind == CLAP_PRESET_DISCOVERY_LOCATION_FILE) {
+		const std::string text = read_file(location);
+		ok = !text.empty() && s.load_preset_text(text, s.output_now(), -1); // (the output level and legato kept)
+		if (ok) s.factory = -1;
 	}
-	s.load_values(static_cast<int>(i), -1, {});
-	if (const auto* hl = static_cast<const clap_host_preset_load*>(s.host->get_extension(s.host, CLAP_EXT_PRESET_LOAD)))
-		hl->loaded(s.host, kind, location, key);
-	return true;
+	if (hl) {
+		if (ok) hl->loaded(s.host, kind, location, key);
+		else hl->on_error(s.host, kind, location, key, -1, "not one of this engine's presets");
+	}
+	return ok;
 }
 const clap_plugin_preset_load kPresetLoad = {preset_from_location};
 
@@ -726,7 +800,11 @@ bool provider_metadata(const clap_preset_discovery_provider*, uint32_t kind, con
 	if (kind != CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN || location) return false;
 	const nsc_desc& d = desc();
 	for (int i = 0; i < d.num_presets; i++) {
-		const std::string key = std::to_string(i);
+		// (the load key: the index, zero-padded, so a host or clap-wrapper that sorts the keys as text
+		// lists the presets in their order: "007" before "010")
+		char key_s[16];
+		std::snprintf(key_s, sizeof key_s, "%03d", i);
+		const std::string key = key_s;
 		if (!r->begin_preset(r, d.presets[i].name, key.c_str())) break;
 		const clap_universal_plugin_id id = {"clap", plugin_id()};
 		r->add_plugin_id(r, &id);

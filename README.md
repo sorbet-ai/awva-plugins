@@ -12,6 +12,13 @@ The [awva](https://github.com/sorbet-ai/awva) sound engines as instrument plugin
   - MIDI 1.0 and MPE;
   - MIDI 2.0 (UMP).
 - **Output:** stereo; a mono engine is on both channels. There is no GUI: the host shows the parameters.
+- **Presets:** each engine's factory presets, in their order, in every format:
+  - CLAP: preset-discovery, with the factory presets as the plugin's location, and preset-load;
+  - VST3: the plugin's preset list, the program list of its root unit;
+  - AU: its factory presets.
+
+  A preset file (`awva-preset/1`, `.preset.json`, as in awva's `presets/`) loads through CLAP preset-load from its path.
+- **State:** a project saves the sound as an `awva-preset/1` file, and a project restores it exactly. It also stores the output level, legato and the factory preset the sound started from (see below).
 
 All the plugins come from one generic source, `src/plugin.cpp`, which sees only CLAP and awva's engine component ABI (`nsc/nsc.h`, ABI 2). Each engine's component is linked in, built by awva's `awva_add_component(<target> <engine> STATIC)`. The plugin takes everything it shows from the component's descriptor: the name, summary, parameters, factory presets, voices and tail. clap-wrapper makes the VST3 and the AU from the same code.
 
@@ -40,6 +47,32 @@ The name is the engine's title (`nsc_desc.name`); the id is its short name (`nsc
 - The AU type is `aumu` and its manufacturer code is `Awva`.
 - The subtype is the engine id's first four letters, the first capitalised, padded with `_`. The build stops if two engines would share a subtype.
 
+## Presets and state
+
+**Factory presets.** The presets come from the component's descriptor, so each plugin lists exactly its engine's factory presets, by name and in their order. clap-wrapper builds the VST3's and the AU's lists from the plugin's own preset discovery.
+
+**The state.** A host's save and restore of the plugin use the sound as an `awva-preset/1` JSON file, as the component's `save_preset()` writes it: the engine, the title, the heroes, and every parameter by name. One more key holds the plugin's own settings, which a preset reader skips:
+
+```json
+"awva-plugin": {"output": 1, "legato": false, "factory_preset": 3}
+```
+
+- `output` is the component's output level. It is not part of a preset.
+- `legato` is mono legato.
+- `factory_preset` is the factory preset the sound started from, or -1 for none.
+
+**Restoring.**
+- **A sound made from a factory preset** is restored the way it was made: the preset by its index, then the values that differ from it. The component has that preset as its own again, with its heroes and `preset()`, and a sound edited after a preset comes back bit for bit.
+- **Any other sound** is read by the component's `load_preset()`.
+
+The info proof checks that a restored project gives the same sound, bit for bit, and saves the same state text again. It does this on every engine, for four cases:
+- the defaults;
+- random parameters;
+- a factory preset;
+- a factory preset followed by random parameters.
+
+A state from another engine, or text that isn't a preset, is refused.
+
 ## Building
 
 You need CMake 3.25 or later, Ninja, Python 3 and git, plus one of:
@@ -55,8 +88,13 @@ tools/package.sh windows-x64      # or macos-universal: dist/awva-plugins-<versi
 
 **Dependencies:** `fetch_deps.sh` puts each one in its own directory under `deps/`. Each is checked against a pinned commit or SHA-256. awva itself is pinned by `AWVA_COMMIT`: a change in awva reaches the plugins only through a bump of that file.
 
-**Proofs:** `ctest -L plugin` runs six of them on each engine.
-- **info:** the plugin matches its component: the same id, name, parameters and presets. It also checks the ports, preset loading, and a state round trip, both active and inactive.
+**Proofs:** `ctest -L plugin` runs seven of them on each engine.
+- **info:** the plugin matches its component: the same id, name, parameters and presets. It also checks:
+  - the ports;
+  - preset loading, by index and from each of awva's preset files, which give their factory preset's values bit for bit;
+  - a state round trip, both active and inactive;
+  - that a restored project is exact, in the four cases above.
+- **vst3_presets:** a minimal VST3 host (the VST3 SDK's hosting module) reads the VST3's preset list. It must hold the factory presets, by name and in order.
 - **perf:** the engine's default preset playing the awva SDK's default scripted performance.
   - The proof runs it through the plugin by a private test extension, `com.sorbet-ai.awva.voice-controls/1`; a DAW never uses it.
   - The output must equal `awva_render`'s × 0.25, subnormals flushed, bit for bit, at host blocks of 256, 1, 33 and random sizes.
@@ -81,7 +119,10 @@ The last run gave the same result on Windows and macOS:
 **Known validator artefacts:** `tools/validate.sh` excludes these tests and says why.
 - **clap-validator `preset-discovery-crawl` and `-load`:** they deadlock inside clap-validator 0.4.1 itself. `begin_preset` holds its result mutex and `flush_preset()` locks it again. The plugins' preset discovery is tested by the info proof instead.
 - **clap-validator `process-varying-sample-rates`:** it activates the plugin at rates from 1 kHz to 768 kHz and fails at the first rate the plugin refuses. The plugins run only the engines' own rates (`min_rate` .. `max_rate`, 11.025 to 192 kHz), and `activate()` refuses others, as CLAP allows. The info proof checks that range.
-- **auval warning:** every AU passes with one warning, "Preset name is not retained in retrieved class data", from clap-wrapper's AU preset handling.
+- **auval warning:** every AU passes with one warning, "Preset name is not retained in retrieved class data".
+  - auval sets a preset name through `kAudioUnitProperty_PresentPreset`, then reads the class data back.
+  - clap-wrapper 0.17.0's `SaveState` writes its own `_current_program_name` ("Program", or the name of the last state restored), not the preset the AU SDK holds as current (`mCurrentPreset`, which `AUBase::SaveState` would write).
+  - The plugin can't reach that code, so the fix belongs in clap-wrapper. It is drafted in `docs/upstream_reports.md`.
 
 ## Timing
 

@@ -11,6 +11,7 @@ These are drafts only. None has been filed: whether to file them is the user's d
 | 5 | clap-wrapper | 0.17.0 (806bba0) | `target_add_vst3_wrapper(... ASSET_OUTPUT_DIRECTORY)` is ignored on macOS and for a single-file Windows VST3 |
 | 6 | clap-wrapper | 0.17.0 (806bba0) | `target_add_auv2_wrapper` fails for an OUTPUT_NAME with spaces |
 | 7 | clap-wrapper | 0.17.0 (806bba0) | the AUv2 still returns a Cocoa view for a plugin without the gui extension |
+| 8 | clap-wrapper | 0.17.0 (806bba0) | the AUv2's class data doesn't keep the current preset's name |
 
 ---
 
@@ -126,3 +127,23 @@ This is from reading the code; I didn't reproduce it at runtime. 0.17.0 fixed th
 **Expected:** `kAudioUnitErr_InvalidProperty`, as `GetPropertyInfo` returns, so a host that calls `GetProperty` directly gets no view for a plugin without a GUI.
 
 **Actual (by reading):** the host gets a view class for a plugin that has no GUI.
+
+---
+
+## 8. clap-wrapper: the AUv2's class data doesn't keep the current preset's name
+
+**Version:** clap-wrapper 0.17.0 (806bba0), `src/wrapasauv2.cpp`; AudioUnitSDK 1.1.0.
+
+**Repro:**
+1. Wrap any CLAP that has the state extension as an AUv2.
+2. Run `auval -strict -v aumu <subtype> <manufacturer>`.
+
+**Expected:** auval sets a user preset with a name (`kAudioUnitProperty_PresentPreset`, `presetNumber` -1), and the class data it then reads (`kAudioUnitProperty_ClassInfo`) carries that name under `kAUPresetNameKey`. The same holds for a factory preset chosen through `PresentPreset`.
+
+**Actual:** "WARNING: Preset name is not retained in retrieved class data", on every AU.
+
+**Cause:**
+- `WrapAsAUV2::SaveState()` (around line 2256) writes `_current_program_name` as the preset name. That is "Program", or the name of the last class data restored (`RestoreState`).
+- The preset the host set is kept by the AU SDK as `mCurrentPreset` (`AUBase::NewCustomPresetSet` / `SetAFactoryPresetAsCurrent`), and `AUBase::SaveState` writes that one.
+
+**Fix:** write `mCurrentPreset.presetName` (`AUBase::GetPresentPreset`) when it is set, else `_current_program_name`.

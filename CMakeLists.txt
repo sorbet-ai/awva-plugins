@@ -141,15 +141,30 @@ target_include_directories(clap_host_test PRIVATE "${CLAP_SDK_ROOT}/include" "${
 target_link_libraries(clap_host_test PRIVATE awva_sdk awva_performances ${CMAKE_DL_LIBS})
 target_compile_definitions(clap_host_test PRIVATE $<$<PLATFORM_ID:Windows>:_CRT_SECURE_NO_WARNINGS>)
 add_dependencies(clap_host_test awva_render nsc_components make_test_midi)
+# vst3_programs: a minimal VST3 host (the VST3 SDK's hosting module) that reads the VST3's preset list
+set(_vh "${VST3_SDK_ROOT}/public.sdk/source/vst/hosting")
+add_executable(vst3_programs tests/vst3_programs.cpp "${_vh}/module.cpp" "${_vh}/hostclasses.cpp" "${_vh}/pluginterfacesupport.cpp"
+  "${VST3_SDK_ROOT}/public.sdk/source/vst/utility/stringconvert.cpp" "${VST3_SDK_ROOT}/public.sdk/source/common/commonstringconvert.cpp"
+  "${VST3_SDK_ROOT}/public.sdk/source/vst/vstinitiids.cpp" "${VST3_SDK_ROOT}/pluginterfaces/base/funknown.cpp"
+  "${VST3_SDK_ROOT}/pluginterfaces/base/coreiids.cpp" $<IF:$<BOOL:${APPLE}>,${_vh}/module_mac.mm,${_vh}/module_win32.cpp>)
+target_include_directories(vst3_programs PRIVATE "${VST3_SDK_ROOT}" "${AWVA_DIR}/component/include")
+set_target_properties(vst3_programs PROPERTIES CXX_STANDARD 17)
+if(APPLE)
+  target_link_libraries(vst3_programs PRIVATE "-framework CoreFoundation" "-framework Foundation")
+  set_source_files_properties("${_vh}/module_mac.mm" PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+else()
+  target_compile_definitions(vst3_programs PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
 foreach(v IN LISTS AWVA_PLUGIN_ENGINES)
   add_dependencies(clap_host_test awva_${v}_clap)
+  add_dependencies(vst3_programs awva_${v}_vst3)
   if(APPLE)
     set(_clap "$<TARGET_BUNDLE_DIR:awva_${v}_clap>")
   else()
     set(_clap "$<TARGET_FILE:awva_${v}_clap>")
   endif()
   set(_lib "$<TARGET_FILE:nsc_${v}>")
-  add_test(NAME plugin.${v}.info COMMAND clap_host_test info "${_clap}" "${_lib}")
+  add_test(NAME plugin.${v}.info COMMAND clap_host_test info "${_clap}" "${_lib}" "${AWVA_DIR}/presets/${v}")
   add_test(NAME plugin.${v}.perf COMMAND "${CMAKE_COMMAND}" "-DENGINE=${v}" "-DOUT=${CMAKE_CURRENT_BINARY_DIR}/proof"
     "-DRENDER=$<TARGET_FILE:awva_render>" "-DHOST=$<TARGET_FILE:clap_host_test>" "-DCLAP=${_clap}"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/perf_proof.cmake")
@@ -158,8 +173,9 @@ foreach(v IN LISTS AWVA_PLUGIN_ENGINES)
     "-DMAKE_MIDI=$<TARGET_FILE:make_test_midi>" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/midi_proof.cmake")
   add_test(NAME plugin.${v}.ump COMMAND clap_host_test ump "${_clap}" "${_lib}")
   add_test(NAME plugin.${v}.notes COMMAND clap_host_test notes "${_clap}")
+  add_test(NAME plugin.${v}.vst3_presets COMMAND vst3_programs "${CMAKE_BINARY_DIR}/awva_${v}.vst3" "${_lib}")
   add_test(NAME plugin.${v}.many COMMAND clap_host_test many "${_clap}" "${_lib}")
-  set_tests_properties(plugin.${v}.info plugin.${v}.perf plugin.${v}.ump plugin.${v}.notes plugin.${v}.many plugin.${v}.midi PROPERTIES LABELS plugin)
+  set_tests_properties(plugin.${v}.info plugin.${v}.perf plugin.${v}.ump plugin.${v}.notes plugin.${v}.many plugin.${v}.midi plugin.${v}.vst3_presets PROPERTIES LABELS plugin)
 endforeach()
 
 # clap-wrapper's own libraries are C++17 code (char8_t paths and its fmt break under C++20): every

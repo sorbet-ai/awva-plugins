@@ -4,7 +4,7 @@
 // A minimal CLAP host for the awva plugins: loads a plugin (a .clap), plays it, checks what it
 // gives. Never opens an audio device: it only calls process().
 //
-//   clap_host_test info PLUGIN.clap COMPONENT_LIB
+//   clap_host_test info PLUGIN.clap COMPONENT_LIB [PRESET_DIR]
 //     The plugin is its component's: id, name and summary, the parameters (ids, ranges, kinds),
 //     the presets (preset-discovery, preset-load), the voices; the ports; a state round trip.
 //   clap_host_test voices PLUGIN.clap
@@ -41,6 +41,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <functional>
 #include <memory>
 #include <random>
 #include <string>
@@ -646,7 +648,150 @@ int list_presets(std::vector<std::string>* names) {
 	return static_cast<int>(names->size());
 }
 
-int info_test(const char* lib_path) {
+// a short phrase (three notes with pressure and brightness), its output from an instance set up
+// by `setup` (inactive) at 48 kHz
+std::vector<float> phrase(const std::function<void(Instance&)>& setup, Buffer* state_out = nullptr, const Buffer* state_in = nullptr) {
+	Instance in;
+	if (state_in) {
+		Buffer b{state_in->data};
+		const clap_istream is = {&b, buf_read};
+		if (!in.ext<clap_plugin_state>(CLAP_EXT_STATE)->load(in.p, &is)) return {};
+	}
+	if (setup) setup(in);
+	// a second of silence first, as a project has before its first note: a preset and the values
+	// set after it settle (an engine glides into a preset's values), then the state is saved
+	in.start(48000);
+	{
+		std::vector<float> l(256), r(256);
+		for (int k = 0; k < 48000 / 256; k++) {
+			Events none;
+			in.process(0, 256, none, l.data(), r.data());
+		}
+	}
+	if (state_out) {
+		const clap_ostream os = {state_out, buf_write};
+		if (!in.ext<clap_plugin_state>(CLAP_EXT_STATE)->save(in.p, &os)) return {};
+	}
+	std::vector<Timed> ev;
+	const int keys[3] = {57, 60, 64};
+	for (int n = 0; n < 3; n++) {
+		const uint64_t on = 960 + 7200 * static_cast<uint64_t>(n);
+		clap_event_note x = {{sizeof x, 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_NOTE_ON, 0}, 300 + n, 0, 0, static_cast<int16_t>(keys[n]), 0.7};
+		push(ev, on, x);
+		clap_event_note_expression pr = {{sizeof pr, 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_NOTE_EXPRESSION, 0}, CLAP_NOTE_EXPRESSION_PRESSURE,
+		    300 + n, 0, 0, static_cast<int16_t>(keys[n]), 0.6};
+		push(ev, on, pr);
+		clap_event_note y = {{sizeof y, 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_NOTE_OFF, 0}, 300 + n, 0, 0, static_cast<int16_t>(keys[n]), 0.0};
+		push(ev, on + 24000, y);
+	}
+	std::vector<float> out(48000 * 2 * 2);
+	std::vector<float> l(256), r(256);
+	size_t k = 0;
+	for (uint64_t at = 0; at < 48000 * 2; at += 256) {
+		Events e;
+		for (; k < ev.size() && ev[k].frame < at + 256; k++) {
+			e.store.push_back(ev[k].bytes);
+			reinterpret_cast<clap_event_header*>(e.store.back().data())->time = static_cast<uint32_t>(ev[k].frame - at);
+		}
+		in.process(at, 256, e, l.data(), r.data());
+		for (int i = 0; i < 256; i++) {
+			out[(at + i) * 2] = l[i];
+			out[(at + i) * 2 + 1] = r[i];
+		}
+	}
+	return out;
+}
+
+// random values for every parameter (inactive: through flush), legato among them
+void randomize(Instance& in, uint32_t seed) {
+	const auto* pa = in.ext<clap_plugin_params>(CLAP_EXT_PARAMS);
+	std::mt19937 rng(seed);
+	for (uint32_t i = 0; i < pa->count(in.p); i++) {
+		clap_param_info pi;
+		pa->get_info(in.p, i, &pi);
+		in.set_param(pi.id, pi.min_value + (pi.max_value - pi.min_value) * (rng() % 1000) / 999.0);
+	}
+}
+
+// a project's state restores the sound exactly: the same phrase from the saved instance and from a
+// new one that loaded its state, bit for bit, and the restored one saves the same text again
+void exact_restore(const nsc_desc& nd) {
+	struct Case {
+		const char* name;
+		std::function<void(Instance&)> setup;
+	};
+	std::vector<Case> cases = {{"defaults", nullptr}, {"random parameters", [](Instance& in) { randomize(in, 11); }}};
+	if (nd.num_presets > 1)
+		cases.push_back({"the last factory preset", [n = nd.num_presets](Instance& in) {
+			                 const auto* p = in.ext<clap_plugin_preset_load>(CLAP_EXT_PRESET_LOAD);
+			                 (void)p->from_location(in.p, CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN, nullptr, std::to_string(n - 1).c_str());
+		                 }});
+	if (nd.num_presets > 1)
+		cases.push_back({"the last factory preset, then random parameters", [n = nd.num_presets](Instance& in) {
+			                 const auto* p = in.ext<clap_plugin_preset_load>(CLAP_EXT_PRESET_LOAD);
+			                 (void)p->from_location(in.p, CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN, nullptr, std::to_string(n - 1).c_str());
+			                 randomize(in, 12);
+		                 }});
+	for (const Case& c : cases) {
+		Buffer saved, again;
+		const std::vector<float> a = phrase(c.setup, &saved);
+		const std::vector<float> b = phrase(nullptr, &again, &saved);
+		double peak = 0;
+		for (float x : a) peak = std::fmax(peak, std::fabs(x));
+		if (!same_bits(a, b)) {
+			size_t first = 0, n = 0;
+			double md = 0;
+			for (size_t i = 0; i < a.size() && i < b.size(); i++)
+				if (std::memcmp(&a[i], &b[i], 4) != 0) {
+					if (!n++) first = i;
+					md = std::fmax(md, std::fabs(static_cast<double>(a[i]) - b[i]));
+				}
+			std::printf("     the sound differs: %zu samples, the first at frame %zu, at most %g\n", n, first / 2, md);
+		}
+		if (saved.data != again.data) std::printf("     the state text differs:\n%s\n---\n%s\n", saved.data.c_str(), again.data.c_str());
+		check(!a.empty() && same_bits(a, b) && saved.data == again.data && peak > 0.0,
+		    std::string("a project restores exactly (") + c.name + "): the same sound, bit for bit (peak " + std::to_string(peak) +
+		        "), and the same state text again (" + std::to_string(saved.data.size()) + " bytes)");
+	}
+}
+
+// the engine's preset files (awva's presets/<engine>/NN-<name>.preset.json, in name order) through
+// preset-load: each gives the values its factory preset gives
+void preset_files(const nsc_desc& nd, const char* dir) {
+	std::vector<std::string> files;
+	std::error_code ec;
+	for (const auto& f : std::filesystem::directory_iterator(dir, ec))
+		if (f.path().string().size() > 12 && f.path().string().rfind(".preset.json") == f.path().string().size() - 12) files.push_back(f.path().string());
+	std::sort(files.begin(), files.end());
+	if (nd.num_presets == 0) {
+		check(files.empty(), "no preset files, no factory presets");
+		return;
+	}
+	int same = 0;
+	for (size_t k = 0; k < files.size(); k++) {
+		Instance a, b;
+		const auto* pa = a.ext<clap_plugin_preset_load>(CLAP_EXT_PRESET_LOAD);
+		const auto* pb = b.ext<clap_plugin_preset_load>(CLAP_EXT_PRESET_LOAD);
+		const bool la = pa->from_location(a.p, CLAP_PRESET_DISCOVERY_LOCATION_FILE, files[k].c_str(), nullptr);
+		const bool lb = pb->from_location(b.p, CLAP_PRESET_DISCOVERY_LOCATION_PLUGIN, nullptr, std::to_string(k).c_str());
+		const auto* qa = a.ext<clap_plugin_params>(CLAP_EXT_PARAMS);
+		const auto* qb = b.ext<clap_plugin_params>(CLAP_EXT_PARAMS);
+		bool eq = la && lb;
+		for (uint32_t i = 0; eq && i < qa->count(a.p); i++) {
+			clap_param_info pi;
+			qa->get_info(a.p, i, &pi);
+			double va = 0, vb = 0;
+			qa->get_value(a.p, pi.id, &va);
+			qb->get_value(b.p, pi.id, &vb);
+			eq = std::memcmp(&va, &vb, sizeof va) == 0;
+		}
+		same += eq;
+	}
+	check(static_cast<int>(files.size()) == nd.num_presets && same == nd.num_presets,
+	    std::to_string(files.size()) + " preset files through preset-load: each the values of its factory preset, bit for bit (" + std::to_string(same) + ")");
+}
+
+int info_test(const char* lib_path, const char* preset_dir) {
 	nsc_library lib;
 	if (nsc_load(lib_path, &lib) != 0) {
 		std::fprintf(stderr, "clap_host_test: cannot load the component %s\n", lib_path);
@@ -780,11 +925,19 @@ int info_test(const char* lib_path) {
 			check(saved && ok && diff == 0 && rescans == 1, std::string("state round trip into a new instance, ") + (active ? "active" : "inactive") +
 			        ": every value the same, bit for bit (" + std::to_string(diff) + " differ), a rescan");
 		}
-		Buffer bad{"awva-plugin 1\nengine no-such-engine\n"};
-		const clap_istream is = {&bad, buf_read};
-		Instance c;
-		check(!c.ext<clap_plugin_state>(CLAP_EXT_STATE)->load(c.p, &is), "another engine's state refused");
+		check(st.data.rfind("{", 0) == 0 && st.data.find("\"format\": \"awva-preset/1\"") != std::string::npos &&
+		          st.data.find("\"awva-plugin\": {") != std::string::npos,
+		    "the state is an awva-preset/1 file, with the plugin's own key");
+		for (const char* text : {"{\"format\": \"awva-preset/1\", \"engine\": {\"id\": \"no-such-engine\"}, \"params\": {}}",
+		         "awva-plugin 1\nengine x\n", ""}) {
+			Buffer bad{text};
+			const clap_istream is = {&bad, buf_read};
+			Instance c;
+			check(!c.ext<clap_plugin_state>(CLAP_EXT_STATE)->load(c.p, &is), std::string("refused as a state: ") + (*text ? std::string(text).substr(0, std::min<size_t>(40, std::string(text).find('\n'))) : "nothing"));
+		}
 	}
+	exact_restore(nd);
+	if (preset_dir) preset_files(nd, preset_dir);
 	nsc_unload(&lib);
 	return 0;
 }
@@ -809,7 +962,7 @@ int main(int argc, char** argv) {
 		entry->deinit();
 		return 0;
 	}
-	if (mode == "info" && argc >= 4) rc = info_test(argv[3]);
+	if (mode == "info" && argc >= 4) rc = info_test(argv[3], argc >= 5 ? argv[4] : nullptr);
 	else if (mode == "perf" && argc >= 4) rc = perf_test(argv[3]);
 	else if (mode == "ump" && argc >= 4) rc = ump_test(argv[3]);
 	else if (mode == "midifile" && argc >= 5) rc = midifile_test(argv[3], argv[4], argc >= 6 ? std::atoi(argv[5]) : 48000);
