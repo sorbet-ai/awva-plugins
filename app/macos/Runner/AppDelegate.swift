@@ -5,8 +5,9 @@ import FlutterMacOS
 
 @main
 class AppDelegate: FlutterAppDelegate {
-  // (FlutterAppDelegate has no applicationDidFinishLaunching of its own: no super call)
-  func applicationDidFinishLaunching(_ notification: Notification) {
+  // (FlutterAppDelegate declares applicationDidFinishLaunching but doesn't implement it: an
+  // override, without a super call, which would be an unrecognized selector)
+  override func applicationDidFinishLaunching(_ notification: Notification) {
     // --hidden: no window, no Dock icon (smoke runs on someone's machine)
     if CommandLine.arguments.contains("--hidden") {
       NSApp.setActivationPolicy(.prohibited)
