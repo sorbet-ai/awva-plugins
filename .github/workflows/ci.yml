@@ -9,6 +9,9 @@
 #   4. clap-validator, pluginval at strictness 10 on the VST3, and on macOS auval -strict, with the
 #      AU installed in the runner's ~/Library for the run.
 #   5. The release archive of the platform.
+#   6. The standalone app (app/): its core's checks (ctest -L app: every engine's output against its
+#      CLAP's, bit for bit), the Flutter tests (widgets, the core through FFI, the screenshots on
+#      Windows), the app built (macOS: universal), a smoke run with no audio device, its archive.
 # On a tag v<version> (the version must be CMakeLists.txt's), the release job publishes both
 # archives with SHA256SUMS as a GitHub release.
 #
@@ -54,6 +57,59 @@ jobs:
         run: ./build.sh build
       - name: bit-identity proofs
         run: ./build.sh test -j 4
+      - name: app core checks
+        run: ctest --test-dir build -L app --output-on-failure -j 4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.41.2
+          channel: stable
+          cache: true
+      - name: app tests
+        working-directory: app
+        run: flutter test
+      - name: app build
+        working-directory: app
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then flutter build windows --release; else flutter build macos --release; fi
+      - name: app smoke run (no audio device, no MIDI, no window)
+        working-directory: app
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then
+            exe=build/windows/x64/runner/Release/awva.exe
+          else
+            app=build/macos/Build/Products/Release/awva.app
+            exe="$app/Contents/MacOS/awva"
+            for b in "$exe" "$app/Contents/Frameworks/libawva_app_core.dylib" "$app"/Contents/Resources/engines/*.dylib; do
+              archs="$(lipo -archs "$b")"; echo "$b: $archs"
+              case "$archs" in *arm64*x86_64*|*x86_64*arm64*) ;; *) echo "not universal: $b"; exit 1 ;; esac
+            done
+          fi
+          "$exe" --no-audio --no-midi --hidden --exit-after 3 --probe-wav "$RUNNER_TEMP/probe.wav" --engines-dir "$RUNNER_TEMP/none"
+          test -s "$RUNNER_TEMP/probe.wav"
+      - name: app archive
+        id: app_package
+        working-directory: app
+        run: |
+          v="$(sed -n 's/^version: \([0-9.]*\).*/\1/p' pubspec.yaml)"
+          mkdir -p ../dist
+          if [ "$RUNNER_OS" = Windows ]; then
+            z="../dist/awva-app-$v-${{ matrix.platform }}.zip"
+            (cd build/windows/x64/runner/Release && 7z a -tzip "$OLDPWD/$z" . > /dev/null)
+          else
+            z="../dist/awva-app-$v-${{ matrix.platform }}.zip"
+            ditto -c -k --keepParent build/macos/Build/Products/Release/awva.app "$z"
+          fi
+          echo "zip=dist/$(basename "$z")" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: app-${{ matrix.platform }}
+          path: ${{ steps.app_package.outputs.zip }}
+      - uses: actions/upload-artifact@v6
+        if: always() && runner.os == 'Windows'
+        with:
+          name: app-screenshots
+          path: app/test/goldens/
+
       - name: validators
         env:
           AUVAL_DIRECT: "1"

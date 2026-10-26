@@ -24,6 +24,15 @@
 
 All the plugins come from one generic source, `src/plugin.cpp`, which sees only CLAP and awva's engine component ABI (`nsc/nsc.h`, ABI 2). Each engine's component is linked in, built by awva's `awva_add_component(<target> <engine> STATIC)`. The plugin takes everything it shows from the component's descriptor: the name, summary, parameters, factory presets, voices and tail. clap-wrapper makes the VST3 and the AU from the same code.
 
+## The standalone app
+
+`app/` is awva as an instrument of its own, for Windows and macOS: an engine and preset picker, the
+hero knobs, MIDI 2.0, MPE and MIDI 1.0 in, and audio out behind a safety chain. Its core is C++
+built here with the plugins (so it plays what they play: `ctest -L app` checks each engine's output
+against its CLAP's, bit for bit), and its UI is Flutter. It also plays engine packages from a
+folder, so new builds of an engine can be played without rebuilding anything. See
+[app/README.md](app/README.md) and [app/DESIGN.md](app/DESIGN.md).
+
 ## The engines
 
 | engine | name | what it is | parameters | factory presets | voices | AU subtype |

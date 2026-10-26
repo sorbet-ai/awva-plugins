@@ -3,6 +3,8 @@
 //
 // The screen: what it shows and what it sends the core, and its screenshots in both themes
 // (goldens: `flutter test --update-goldens` writes them; test/goldens/*.png).
+import 'dart:io';
+
 import 'package:awva/src/controller.dart';
 import 'package:awva/src/screen.dart';
 import 'package:awva/src/widgets.dart';
@@ -73,7 +75,8 @@ void main() {
     expect(core.settings['theme'], 'light');
   });
 
-  group('screenshots', () {
+  // (the goldens are Windows renders: another OS rasterises the type differently)
+  group('screenshots', skip: !Platform.isWindows, () {
     for (final (name, b) in [('light', Brightness.light), ('dark', Brightness.dark)]) {
       testWidgets('main, $name', (t) async {
         await _pump(t, b: b);
