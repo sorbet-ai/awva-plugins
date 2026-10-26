@@ -181,6 +181,24 @@ foreach(v IN ITEMS bowed va)
   endif()
 endforeach()
 
+# editor_host_test: the editor through the CLAP gui extension, as a host uses it (Windows: a knob dragged
+# in a hidden window must reach the host as a gesture and values)
+add_executable(editor_host_test tests/editor_host_test.cpp)
+target_include_directories(editor_host_test PRIVATE "${CLAP_SDK_ROOT}/include" include)
+target_link_libraries(editor_host_test PRIVATE ${CMAKE_DL_LIBS})
+foreach(v IN ITEMS bowed va)
+  if(v IN_LIST AWVA_PLUGIN_ENGINES)
+    add_dependencies(editor_host_test awva_${v}_clap)
+    if(APPLE)
+      set(_clap "$<TARGET_BUNDLE_DIR:awva_${v}_clap>")
+    else()
+      set(_clap "$<TARGET_FILE:awva_${v}_clap>")
+    endif()
+    add_test(NAME plugin.${v}.editor COMMAND editor_host_test "${_clap}")
+    set_tests_properties(plugin.${v}.editor PROPERTIES LABELS plugin)
+  endif()
+endforeach()
+
 # vst3_programs: a minimal VST3 host (the VST3 SDK's hosting module) that reads the VST3's preset list
 set(_vh "${VST3_SDK_ROOT}/public.sdk/source/vst/hosting")
 add_executable(vst3_programs tests/vst3_programs.cpp "${_vh}/module.cpp" "${_vh}/hostclasses.cpp" "${_vh}/pluginterfacesupport.cpp"
