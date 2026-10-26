@@ -8,11 +8,14 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../tool/gen_tokens.dart' as gen;
 
+// (a checkout may have CRLF line ends)
+String _read(String path) => File(path).readAsStringSync().replaceAll('\r\n', '\n');
+
 void main() {
   test('lib/src/tokens.g.dart is current (dart run tool/gen_tokens.dart)', () {
-    expect(File(gen.dartOut).readAsStringSync(), gen.dartTokens(gen.readTokens()));
+    expect(_read(gen.dartOut), gen.dartTokens(gen.readTokens()));
   });
   test('include/awva_plugin/design_tokens.h is current', () {
-    expect(File(gen.cppOut).readAsStringSync(), gen.cppTokens(gen.readTokens()));
+    expect(_read(gen.cppOut), gen.cppTokens(gen.readTokens()));
   });
 }
