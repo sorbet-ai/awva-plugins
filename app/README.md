@@ -51,78 +51,79 @@ same design is what the plugins show in a DAW, drawn natively (`DESIGN.md`).
   and reset at once. A package's engine that does it is stopped until you choose another engine.
 - The OS's volume applies after all of this.
 
-## Your engines: packages (awva-package/1)
+## Your engines: packages (`.awvapkg`, awva-package/2)
 
-A package is a folder in:
+An engine build ships as one file, `<id>-<slug>.awvapkg`. The same file is loaded by:
+- this app (its PC image);
+- the virtual board and the board (their own images, through the firmware's module store);
+- Striso Live, which sends it to them unchanged.
 
+The app reads them from:
 - Windows: `%APPDATA%\awva\engines\`
 - macOS: `~/Library/Application Support/awva/engines/`
 
-```
-<engines>/<package>/                 any folder name: it is the package's identity
-  awva-package.json                  the manifest
-  <id>.dll | <id>.dylib              the engine component (awva nsc.h, ABI 2), for a library package
-  <id>.json                          optional: awva's nsc_manifest output (not read)
-  presets/*.preset.json              optional: presets (awva-preset/1) for this engine
-```
+**The container** (awva's `component/include/nsc/package.h`, packed by `component/tools/nsc_pack.py`):
 
-**A library package** (a new build of an engine):
+| part | |
+|---|---|
+| header, 64 B | `'NSCP'`, format 1, the NSC_ABI, the schema hash, the section table's place, the size, CRCs |
+| section table | 48 B per section: kind, tag, offset, size, crc32 |
+| kind 1, manifest | JSON, below |
+| kind 2, image | tag = target: `x86_64-windows`, `arm64-macos`, `x86_64-macos`, `x86_64-linux`, `armv7em-fpv5-d16-softfp`. A 256 B module header, then (Arm only) the relocations, then the image: on a PC the DLL / dylib / so as it is |
+| kind 3, preset | tag = the file's stem (`01-soprano`), the `awva-preset/1` JSON |
 
-```json
-{"format": "awva-package/1", "label": "clarinet v3 (fit)", "library": "clarinet.dll", "awva": "da3ad97"}
-```
-
-- `format`: exactly `awva-package/1`.
-- `label`: the name the app lists it by; the engine's title and version come from its descriptor.
-- `library`: the library's file name in the folder: `.dll` on Windows, `.dylib` on macOS (a
-  package is for one OS).
-- `awva`: the awva commit the library is built on, at least 7 hex digits. It must be the app's
-  pinned commit, `AWVA_COMMIT` (now da3ad97); anything else is refused without loading the library,
-  as "built for a different awva". (da3ad97 changed `nsc_voice` and `nsc_globals` under the same
-  NSC_ABI 2.) NSC_MAGIC and NSC_ABI are checked too.
-
-**A presets-only package** (new presets for a built-in engine, no library):
+**The manifest:**
 
 ```json
-{"format": "awva-package/1", "label": "bowed fit v1", "engine": "bowed"}
+{"format": "awva-package/2", "label": "clarinet v3 (fit)", "id": "clarinet", "awva": "<commit>",
+ "abi": 4, "images": ["x86_64-windows", "armv7em-fpv5-d16-softfp"], ...nsc_manifest's fields}
 ```
 
-- `engine`: the built-in engine's id. The package plays that engine with the package's presets only.
+- `label`: the name the app lists it by. The engine's title and version come from its image.
+- `awva`: the awva commit the images are built on. It must be this app's pinned commit
+  (`AWVA_COMMIT`); a package built on any other is refused without loading it, as "built for a
+  different awva".
+- `images`: the targets in it. An empty list makes a **presets-only** package: new presets for the
+  built-in engine `id`.
 
-**Presets:** a library package lists its component's factory presets, then its preset files; a
-presets-only package lists its files. Files are read in name order (`01-...`, `02-...`), each by
-the component's `load_preset()` (by name: a value out of range is clamped, an unknown name
-skipped, a missing one gets its default, so write presets complete, as `save_preset()` does). A
-file that is another engine's preset is listed as refused. The preset's `title` is its name in the
-list, and its `heroes`, if it has them, its knobs.
+**What the app checks:**
+- the header and section CRCs, format 1, the ABI;
+- the pin;
+- that an image for this computer is present.
 
-**Names:** a package may have the same engine id as a built-in engine or as another package; each
-package is its own entry.
+A refused package is listed with its reason.
 
-**Building a library:** from awva at the pinned commit (or a branch on it):
+**What it loads:**
+- the image, from a copy, so the package can be written again while it plays;
+- the factory presets, then the package's preset sections in tag order. A preset of another engine
+  is listed as refused.
 
-```
-cmake -S sdk -B build/sdk -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
-cmake --build build/sdk --target nsc_<id>          # -> build/sdk/components/<id>.dll (.dylib)
-```
+Each package is its own entry, even if it has the same engine id as a built-in or another package.
+A package is written as `<name>.awvapkg.tmp` and then renamed, so the app never sees half of one.
 
-On Windows in a Visual Studio x64 environment (vcvars64), as this repository's `build.sh` does.
-Or `awva_add_component(<target> <id> MODULE)` in your own project.
+**Making one:** `app/tools/iterate.sh` (below) for an engine change. Or awva's packager directly:
+`nsc_pack.py host <library> <manifest.json> <tag> <toolchain> <x.nscm>`, then
+`nsc_pack.py package <x.awvapkg> --image <tag>=<x.nscm> --manifest <manifest.json> --label <text> --awva <commit>`.
 
-**The iteration loop:** `app/tools/iterate.sh ENGINE AWVA_DIR` builds an engine change (an awva
-checkout on the app's awva commit) into the package `<engine>-iter<n>`, written through a hidden
-folder, then checks it as the app plays it (`awva_app_cli check`: every preset finite and sounding)
-and compares it with the built-in engine, preset by preset. The running app lists it within two
-seconds (it scans the folder again when it changes; Ctrl+R / Cmd+R, or "Rescan your engines", at
-once). `--presets-only` makes a presets-only package from `presets/<engine>/`. An unchanged checkout
-gives a package that plays bit for bit as the built-in engine.
+**Checking one without the app or a device:**
+- `build/app/awva_app_cli list` lists every engine and package, with why one is refused.
+- `awva_app_cli check --engine package:<name> [--against builtin:<id>]` renders every preset
+  offline through the app's own path, and compares them with another engine.
 
-**Updating:** the app loads a copy of a package's library, so you can write the folder while the
-app runs; Settings > Rescan lists it again.
+## The iteration loop
 
-**Checking a package without the app or a device:** `build/app/awva_app_cli list` lists every
-engine and package with why one is refused; `awva_app_cli render --engine package:<folder>
---preset 0 --out x.wav` renders an MPE phrase offline through the app's own path.
+`app/tools/iterate.sh ENGINE AWVA_DIR [--presets-only] [--label TEXT]`:
+1. It builds an engine change into `<engine>-iter<n>.awvapkg`. The change is an awva checkout on
+   the app's awva commit; its nsc.h is checked against the pin. The package is built with awva's
+   own sdk and packager.
+2. It checks the package as the app plays it (`awva_app_cli check`: every preset finite and
+   sounding), and compares it with the built-in engine, preset by preset.
+
+The running app lists the package within two seconds, because it scans the folder again whenever
+it changes. Ctrl+R / Cmd+R, or "Rescan your engines", rescans at once.
+
+`--presets-only` packs `presets/<engine>/` as a presets-only package, with no build. An unchanged
+checkout gives a package that plays bit for bit as the built-in engine.
 
 ## Running
 
