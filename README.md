@@ -13,7 +13,16 @@
   - CLAP notes with per-note pressure, tuning and brightness. All of them go to the engine on one MIDI 2.0 channel, each with its own id, so any number of notes can overlap. The engine's voice allocator takes over the oldest voice when it runs out. Each note gets one NOTE_END, when the engine hands the note back;
   - MIDI 1.0 and MPE;
   - MIDI 2.0 (UMP).
-- **Output:** stereo; a mono engine is on both channels. There is no GUI: the host shows the parameters.
+- **Output:** stereo; a mono engine is on both channels.
+- **Editor:** the awva app's screen, drawn natively (Direct2D and DirectWrite on Windows, Core
+  Graphics and Core Text on macOS) to `app/DESIGN.md`: the presets, the hero knobs, every
+  parameter, legato, light and dark. Its changes reach the host as CLAP gestures and values (so a
+  DAW records them as automation), through the VST3's and the AU's views as well (clap-wrapper).
+  The design tokens are generated with the app's from one file (`app/design/tokens.json` ->
+  `include/awva_plugin/design_tokens.h`); the font (DM Sans, OFL) and the logo are in the binary,
+  and nothing is installed. The theme follows the OS unless chosen in the editor, for every awva
+  plugin (`<app data>/awva/plugin-editor.json`). `ctest -R editor_shot` renders it offscreen in both
+  themes (`build/editor_shots/`).
 - **Presets:** each engine's factory presets, in their order, in every format:
   - CLAP: preset-discovery, with the factory presets as the plugin's location, and preset-load;
   - VST3: the plugin's preset list, the program list of its root unit;

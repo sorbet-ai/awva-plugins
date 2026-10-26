@@ -137,6 +137,21 @@ Its preset picker, heroes, "Every parameter", theme and footer (CPU, voices) are
 
 ## 6. The plugin editor
 
-The plugins' editor is drawn natively (C++, per OS) to this document, not with Flutter: the
-evidence is in the pull request that adds the app. The tokens of section 2 are the one source for
-both; the editor takes them from the same values (a generated header), so the two never drift.
+The plugins' editor (`src/editor/`) is drawn natively to this document, not with Flutter (the
+evidence is in the pull request that adds the app): Direct2D and DirectWrite in a child window on
+Windows, Core Graphics and Core Text in an NSView on macOS, the same layout and painting code on
+both (`editor.cpp`, through a small canvas). Each binary registers its own window class (Windows) or
+makes its own view class at run time (macOS), so any number of awva plugins share a host safely.
+
+The tokens of section 2 have one source, `design/tokens.json`: `dart run tool/gen_tokens.dart`
+writes the app's `lib/src/tokens.g.dart` and the editor's `include/awva_plugin/design_tokens.h`
+from it, and a test fails if either is stale. The editor embeds DM Sans and the logo, so it looks
+the same in every host and installs nothing.
+
+| plugin editor | light | dark |
+|---|---|---|
+| the sound | `editor_<engine>_light.png` | `editor_<engine>_dark.png` |
+| every parameter | `..._light_params.png` | `..._dark_params.png` |
+| the preset menu | `..._light_menu.png` | `..._dark_menu.png` |
+
+(`build/editor_shots/`, by `ctest -R editor_shot`; a CI artifact.)

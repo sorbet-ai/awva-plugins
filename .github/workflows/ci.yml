@@ -109,6 +109,11 @@ jobs:
         with:
           name: app-screenshots
           path: app/test/goldens/
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: editor-screenshots-${{ matrix.platform }}
+          path: build/editor_shots/
 
       - name: validators
         env:

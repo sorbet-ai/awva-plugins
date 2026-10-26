@@ -30,6 +30,9 @@
 // component's save_preset), with the plugin's own beside it in one more key ("awva-plugin": the
 // output level, legato, the factory preset it started from), which a preset reader skips.
 // Output: stereo (a mono engine on both channels), x0.25 (awva_render's WAV scaling), subnormals flushed.
+// Editor: the awva app's screen drawn natively (src/editor, app/DESIGN.md): the presets, the hero
+// knobs, every parameter, legato, the theme. Its changes reach the host as CLAP gestures and values
+// (the next process() or params flush puts them out and applies them), as a host's would.
 #include <clap/clap.h>
 
 #include <algorithm>
@@ -40,11 +43,13 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <new>
 #include <string>
 #include <vector>
 
 #include "awva_plugin/voice_controls.h"
+#include "editor/view.h"
 #include "clapwrapper/auv2.h"
 #include "nsc/nsc.h"
 
@@ -174,6 +179,23 @@ struct Plugin {
 	Pending pending;
 	std::atomic<bool> rescan{false};
 
+	// the editor's changes, main thread -> audio thread (or params flush): a single-producer ring
+	struct GuiEv {
+		uint16_t type; // CLAP_EVENT_PARAM_GESTURE_BEGIN, _VALUE, _GESTURE_END
+		clap_id id;
+		double value;
+	};
+	static constexpr size_t kGui = 512;
+	GuiEv gui_ev[kGui];
+	std::atomic<size_t> gui_w{0}, gui_r{0};
+	mutable std::vector<float> gui_val; // the editor's values not yet applied (NaN: none), main thread
+	std::unique_ptr<awva_editor::Editor> editor;
+	awva_editor::View* view = nullptr;
+	double gui_scale = 1.0;
+	float gui_w_pt = static_cast<float>(awva_tokens::kEditorWidth), gui_h_pt = static_cast<float>(awva_tokens::kEditorHeight);
+	struct EditorHost;
+	std::unique_ptr<EditorHost> editor_host;
+
 	int factory = -1; // the factory preset the sound started from (preset-load, or a state); -1: none
 	int out_index = -1; // the component's "output" parameter (not a preset's: the state keeps it)
 	void *sx_state = nullptr, *sx_fast = nullptr, *sx_large = nullptr; // a scratch instance (main thread)
@@ -187,9 +209,11 @@ struct Plugin {
 		(void)c.init(state, fast, large, sr, nv); // (48 kHz: in every engine's range)
 		factory = c.preset(state); // (the preset init() leaves: the engine's default, -1 for none)
 		pending.values.assign(static_cast<size_t>(d.num_params), NAN);
+		gui_val.assign(static_cast<size_t>(d.num_params), NAN);
 		vc.assign(static_cast<size_t>(nv), nsc_voice{});
 	}
-	~Plugin() {
+	~Plugin();
+	void free_regions() {
 		region_free(state);
 		region_free(fast);
 		region_free(large);
@@ -345,6 +369,11 @@ struct Plugin {
 	}
 	// a value as the host should see it: a loaded state not yet applied first
 	double value(int i) const {
+		const float g = gui_val[static_cast<size_t>(i)];
+		if (!std::isnan(g)) {
+			if (c.param(state, i) != g) return g;
+			gui_val[static_cast<size_t>(i)] = NAN; // (applied)
+		}
 		if (pending.st.load() == 2) {
 			const float v = pending.values[static_cast<size_t>(i)];
 			if (!std::isnan(v)) return v;
@@ -438,6 +467,30 @@ struct Plugin {
 		return true;
 	}
 
+	// --- the editor's changes ----------------------------------------------------------------------
+	void gui_push(uint16_t type, clap_id id, double v) { // main thread
+		const size_t w = gui_w.load(std::memory_order_relaxed);
+		if (w - gui_r.load(std::memory_order_acquire) == kGui) return; // (512 ahead of the host: dropped)
+		gui_ev[w % kGui] = {type, id, v};
+		gui_w.store(w + 1, std::memory_order_release);
+		if (const auto* hp = static_cast<const clap_host_params*>(host->get_extension(host, CLAP_EXT_PARAMS))) hp->request_flush(host);
+	}
+	// the audio thread (or the flush): applied, and told to the host, at frame 0
+	void gui_drain(const clap_output_events* out) {
+		for (size_t r = gui_r.load(std::memory_order_relaxed); r != gui_w.load(std::memory_order_acquire); r++) {
+			const GuiEv e = gui_ev[r % kGui];
+			if (e.type == CLAP_EVENT_PARAM_VALUE) {
+				clap_event_param_value v = {{sizeof v, 0, CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_PARAM_VALUE, 0}, e.id, nullptr, -1, -1, -1, -1, e.value};
+				param(v);
+				if (out) out->try_push(out, &v.header);
+			} else if (out) {
+				clap_event_param_gesture g = {{sizeof g, 0, CLAP_CORE_EVENT_SPACE_ID, e.type, 0}, e.id};
+				out->try_push(out, &g.header);
+			}
+			gui_r.store(r + 1, std::memory_order_release);
+		}
+	}
+
 	// --- audio -----------------------------------------------------------------------------------
 	void render_block() {
 		const uint64_t b0 = blocks * NSC_BLOCK;
@@ -486,6 +539,7 @@ struct Plugin {
 		const uint64_t start = frame; // the call's first frame: its events' times count from it
 		out_events = p->out_events;
 		apply_pending();
+		gui_drain(p->out_events);
 		// the notes and MIDI of the whole call first (each waits for its block), then the audio,
 		// a parameter applied at its time
 		const uint32_t ne = p->in_events->size(p->in_events);
@@ -536,6 +590,170 @@ struct Plugin {
 };
 
 Plugin* self(const clap_plugin* p) { return static_cast<Plugin*>(p->plugin_data); }
+
+// --- the editor --------------------------------------------------------------------------------------
+// the editor's theme choice ("system", "light", "dark"), the user's for every awva plugin:
+// <app data>/awva/plugin-editor.json
+std::string theme_file() {
+#if defined(_WIN32)
+	const char* base = std::getenv("APPDATA");
+	return base ? std::string(base) + "\\awva\\plugin-editor.json" : std::string();
+#else
+	const char* home = std::getenv("HOME");
+	return home ? std::string(home) + "/Library/Application Support/awva/plugin-editor.json" : std::string();
+#endif
+}
+std::string read_theme() {
+	const std::string f = theme_file();
+	FILE* fp = f.empty() ? nullptr : std::fopen(f.c_str(), "rb");
+	if (!fp) return "system";
+	char buf[256] = {};
+	const size_t n = std::fread(buf, 1, sizeof buf - 1, fp);
+	std::fclose(fp);
+	const std::string t(buf, n);
+	for (const char* k : {"light", "dark"})
+		if (t.find(std::string("\"") + k + "\"") != std::string::npos) return k;
+	return "system";
+}
+void write_theme(const std::string& theme) {
+	const std::string f = theme_file();
+	if (f.empty()) return;
+	FILE* fp = std::fopen(f.c_str(), "wb");
+	if (!fp) return; // (no awva folder yet: the choice lasts for this session)
+	std::fprintf(fp, "{\"theme\": \"%s\"}\n", theme.c_str());
+	std::fclose(fp);
+}
+
+struct Plugin::EditorHost : awva_editor::Host {
+	Plugin& s;
+	std::string th = read_theme();
+	explicit EditorHost(Plugin& p) : s(p) {}
+	const nsc_desc& desc() const override { return s.d; }
+	int preset() const override { return s.factory; }
+	float value(int i) const override { return static_cast<float>(s.value(i)); }
+	void begin(int i) override { s.gui_push(CLAP_EVENT_PARAM_GESTURE_BEGIN, s.d.params[i].id, 0); }
+	void set(int i, float v) override {
+		const nsc_param& p = s.d.params[i];
+		v = std::clamp(v, p.min, p.max);
+		if (p.kind != NSC_PARAM_CONTINUOUS) v = std::round(v);
+		s.gui_val[static_cast<size_t>(i)] = v;
+		s.gui_push(CLAP_EVENT_PARAM_VALUE, p.id, v);
+	}
+	void end(int i) override { s.gui_push(CLAP_EVENT_PARAM_GESTURE_END, s.d.params[i].id, 0); }
+	void select_preset(int i) override {
+		s.load_values(i, -1, {});
+		s.factory = i;
+	}
+	bool legato() const override { return s.legato.load(); }
+	void set_legato(bool on) override {
+		s.gui_push(CLAP_EVENT_PARAM_GESTURE_BEGIN, kLegatoId, 0);
+		s.gui_push(CLAP_EVENT_PARAM_VALUE, kLegatoId, on ? 1.0 : 0.0);
+		s.gui_push(CLAP_EVENT_PARAM_GESTURE_END, kLegatoId, 0);
+		if (!s.active) s.legato = on;
+	}
+	int voices() const override { return s.active ? s.c.active_voices(s.state) : 0; }
+	std::string theme() const override { return th; }
+	void set_theme(const std::string& t) override {
+		th = t;
+		write_theme(t);
+	}
+	bool os_dark() const override { return awva_editor::view_os_dark(); }
+	void repaint() override { awva_editor::view_repaint(s.view); }
+};
+
+Plugin::~Plugin() {
+	if (view) awva_editor::view_destroy(view);
+	view = nullptr;
+	editor.reset();
+	editor_host.reset();
+	free_regions();
+}
+
+// CLAP's sizes are pixels on Windows (the scale given by set_scale) and points on macOS
+#if defined(_WIN32)
+constexpr bool kGuiPixels = true;
+#else
+constexpr bool kGuiPixels = false;
+#endif
+bool gui_supported(const clap_plugin*, const char* api, bool floating) { return !floating && api && !std::strcmp(api, awva_editor::view_api()); }
+bool gui_preferred(const clap_plugin*, const char** api, bool* floating) {
+	*api = awva_editor::view_api();
+	*floating = false;
+	return true;
+}
+bool gui_create(const clap_plugin* p, const char* api, bool floating) {
+	Plugin& s = *self(p);
+	if (!gui_supported(p, api, floating) || s.view) return false;
+	s.editor_host = std::make_unique<Plugin::EditorHost>(s);
+	s.editor = std::make_unique<awva_editor::Editor>(*s.editor_host);
+	s.view = awva_editor::view_create(*s.editor, *s.editor_host);
+	return s.view != nullptr;
+}
+void gui_destroy(const clap_plugin* p) {
+	Plugin& s = *self(p);
+	if (s.view) awva_editor::view_destroy(s.view);
+	s.view = nullptr;
+	s.editor.reset();
+	s.editor_host.reset();
+}
+bool gui_set_scale(const clap_plugin* p, double scale) {
+	if (!kGuiPixels) return false;
+	Plugin& s = *self(p);
+	s.gui_scale = scale > 0 ? scale : 1.0;
+	if (s.view) awva_editor::view_set_scale(s.view, s.gui_scale);
+	return true;
+}
+bool gui_get_size(const clap_plugin* p, uint32_t* w, uint32_t* h) {
+	const Plugin& s = *self(p);
+	const double k = kGuiPixels ? s.gui_scale : 1.0;
+	*w = static_cast<uint32_t>(std::lround(s.gui_w_pt * k));
+	*h = static_cast<uint32_t>(std::lround(s.gui_h_pt * k));
+	return true;
+}
+bool gui_can_resize(const clap_plugin*) { return true; }
+bool gui_resize_hints(const clap_plugin*, clap_gui_resize_hints* h) {
+	*h = {true, true, false, 0, 0};
+	return true;
+}
+bool gui_adjust_size(const clap_plugin* p, uint32_t* w, uint32_t* h) {
+	const double k = kGuiPixels ? self(p)->gui_scale : 1.0;
+	*w = std::max(*w, static_cast<uint32_t>(std::lround(awva_tokens::kEditorMinWidth * k)));
+	*h = std::max(*h, static_cast<uint32_t>(std::lround(awva_tokens::kEditorMinHeight * k)));
+	return true;
+}
+bool gui_set_size(const clap_plugin* p, uint32_t w, uint32_t h) {
+	Plugin& s = *self(p);
+	const double k = kGuiPixels ? s.gui_scale : 1.0;
+	s.gui_w_pt = static_cast<float>(w / k);
+	s.gui_h_pt = static_cast<float>(h / k);
+	if (s.view) awva_editor::view_set_size(s.view, w, h);
+	return true;
+}
+bool gui_set_parent(const clap_plugin* p, const clap_window* window) {
+	Plugin& s = *self(p);
+	if (!s.view || !window) return false;
+	if (kGuiPixels) awva_editor::view_set_scale(s.view, s.gui_scale);
+	uint32_t w, h;
+	gui_get_size(p, &w, &h);
+	awva_editor::view_set_size(s.view, w, h);
+#if defined(_WIN32)
+	return awva_editor::view_attach(s.view, window->win32);
+#else
+	return awva_editor::view_attach(s.view, window->cocoa);
+#endif
+}
+bool gui_set_transient(const clap_plugin*, const clap_window*) { return false; }
+void gui_suggest_title(const clap_plugin*, const char*) {}
+bool gui_show(const clap_plugin* p) {
+	if (self(p)->view) awva_editor::view_show(self(p)->view, true);
+	return true;
+}
+bool gui_hide(const clap_plugin* p) {
+	if (self(p)->view) awva_editor::view_show(self(p)->view, false);
+	return true;
+}
+const clap_plugin_gui kGui = {gui_supported, gui_preferred, gui_create, gui_destroy, gui_set_scale, gui_get_size, gui_can_resize,
+    gui_resize_hints, gui_adjust_size, gui_set_size, gui_set_parent, gui_set_transient, gui_suggest_title, gui_show, gui_hide};
 
 // --- extensions ----------------------------------------------------------------------------------
 uint32_t audio_count(const clap_plugin*, bool is_input) { return is_input ? 0 : 1; }
@@ -624,9 +842,10 @@ bool params_from_text(const clap_plugin* p, clap_id id, const char* text, double
 	*v = std::strtod(text, &end);
 	return end != text;
 }
-void params_flush(const clap_plugin* p, const clap_input_events* in, const clap_output_events*) {
+void params_flush(const clap_plugin* p, const clap_input_events* in, const clap_output_events* out) {
 	Plugin& s = *self(p);
 	if (s.active) s.apply_pending(); // (the audio thread)
+	s.gui_drain(out);
 	const uint32_t n = in->size(in);
 	for (uint32_t k = 0; k < n; k++) {
 		const clap_event_header* h = in->get(in, k);
@@ -751,6 +970,7 @@ const void* p_extension(const clap_plugin*, const char* id) {
 	if (!std::strcmp(id, CLAP_EXT_STATE)) return &kState;
 	if (!std::strcmp(id, CLAP_EXT_VOICE_INFO)) return &kVoiceInfo;
 	if (!std::strcmp(id, CLAP_EXT_TAIL)) return &kTail;
+	if (!std::strcmp(id, CLAP_EXT_GUI)) return &kGui;
 	if (!std::strcmp(id, CLAP_EXT_PRESET_LOAD) || !std::strcmp(id, CLAP_EXT_PRESET_LOAD_COMPAT)) return &kPresetLoad;
 	if (!std::strcmp(id, AWVA_EXT_VOICE_CONTROLS)) return &kVoiceControls;
 	return nullptr;

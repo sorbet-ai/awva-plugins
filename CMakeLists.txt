@@ -56,9 +56,26 @@ set(CLAP_WRAPPER_DONT_ADD_TARGETS TRUE)
 set(CLAP_WRAPPER_DOWNLOAD_DEPENDENCIES FALSE)
 add_subdirectory(deps/clap-wrapper-0.17.0 clap-wrapper)
 
+# --- the editor (src/editor): the awva app's screen drawn natively, its design tokens generated from
+# app/design/tokens.json (include/awva_plugin/design_tokens.h); the font and the logo compiled in -------
+set(AWVA_EDITOR_ASSETS "${CMAKE_CURRENT_BINARY_DIR}/editor_assets.cpp")
+add_custom_command(OUTPUT "${AWVA_EDITOR_ASSETS}"
+  COMMAND "${CMAKE_COMMAND}" "-DFONT=${CMAKE_CURRENT_SOURCE_DIR}/app/assets/fonts/DMSans.ttf" "-DLOGO=${CMAKE_CURRENT_SOURCE_DIR}/src/editor/logo.png"
+    "-DOUT=${AWVA_EDITOR_ASSETS}" -P "${CMAKE_CURRENT_SOURCE_DIR}/src/editor/embed.cmake"
+  DEPENDS app/assets/fonts/DMSans.ttf src/editor/logo.png src/editor/embed.cmake VERBATIM)
+set(AWVA_EDITOR_SOURCES src/editor/editor.cpp "${AWVA_EDITOR_ASSETS}")
+if(WIN32)
+  list(APPEND AWVA_EDITOR_SOURCES src/editor/editor_win.cpp)
+  set(AWVA_EDITOR_LIBS d2d1 dwrite windowscodecs ole32)
+elseif(APPLE)
+  list(APPEND AWVA_EDITOR_SOURCES src/editor/editor_mac.mm)
+  set_source_files_properties(src/editor/editor_mac.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+  set(AWVA_EDITOR_LIBS "-framework Cocoa" "-framework CoreText" "-framework CoreGraphics" "-framework ImageIO")
+endif()
+
 # --- the generic plugin: CLAP and nsc.h only, compiled once --------------------------------------------
-add_library(awva_plugin_core OBJECT src/plugin.cpp)
-target_include_directories(awva_plugin_core PUBLIC "${CLAP_SDK_ROOT}/include" "${AWVA_DIR}/component/include" include
+add_library(awva_plugin_core OBJECT src/plugin.cpp ${AWVA_EDITOR_SOURCES})
+target_include_directories(awva_plugin_core PUBLIC "${CLAP_SDK_ROOT}/include" "${AWVA_DIR}/component/include" include src
   deps/clap-wrapper-0.17.0/include) # (clapwrapper/auv2.h: the AU codes)
 target_compile_options(awva_plugin_core PRIVATE -Wall -Wextra -ffp-contract=off)
 target_compile_definitions(awva_plugin_core PRIVATE $<$<PLATFORM_ID:Windows>:_CRT_SECURE_NO_WARNINGS>)
@@ -87,7 +104,7 @@ foreach(v IN LISTS AWVA_PLUGIN_ENGINES)
   # defaults, with awva's flags), linked in under the generic plugin
   awva_add_component(awva_${v}_component ${v} STATIC)
   add_library(awva_${v}_impl STATIC $<TARGET_OBJECTS:awva_plugin_core>)
-  target_link_libraries(awva_${v}_impl PUBLIC awva_${v}_component)
+  target_link_libraries(awva_${v}_impl PUBLIC awva_${v}_component ${AWVA_EDITOR_LIBS})
   target_include_directories(awva_${v}_impl PUBLIC "${CLAP_SDK_ROOT}/include")
 
   # the CLAP: the implementation whole (clap_entry is what the host looks for)
@@ -150,6 +167,20 @@ add_dependencies(clap_host_test awva_render nsc_components make_test_midi)
 include("${AWVA_DIR}/sdk/tests/known_failures.cmake")
 add_custom_target(awva_plugin_conformance ALL)
 add_dependencies(awva_plugin_conformance awva_conformance)
+# editor_shot: the editor rendered offscreen, both themes (the screenshots; ctest plugin.editor_shot)
+add_executable(editor_shot tests/editor_shot.cpp ${AWVA_EDITOR_SOURCES})
+target_include_directories(editor_shot PRIVATE "${AWVA_DIR}/component/include" include src)
+target_link_libraries(editor_shot PRIVATE ${AWVA_EDITOR_LIBS} ${CMAKE_DL_LIBS})
+target_compile_definitions(editor_shot PRIVATE $<$<PLATFORM_ID:Windows>:_CRT_SECURE_NO_WARNINGS UNICODE _UNICODE>)
+add_dependencies(editor_shot nsc_components)
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/editor_shots")
+foreach(v IN ITEMS bowed va)
+  if(v IN_LIST AWVA_ENGINES)
+    add_test(NAME plugin.editor_shot.${v} COMMAND editor_shot "$<TARGET_FILE:nsc_${v}>" "${CMAKE_BINARY_DIR}/editor_shots")
+    set_tests_properties(plugin.editor_shot.${v} PROPERTIES LABELS plugin)
+  endif()
+endforeach()
+
 # vst3_programs: a minimal VST3 host (the VST3 SDK's hosting module) that reads the VST3's preset list
 set(_vh "${VST3_SDK_ROOT}/public.sdk/source/vst/hosting")
 add_executable(vst3_programs tests/vst3_programs.cpp "${_vh}/module.cpp" "${_vh}/hostclasses.cpp" "${_vh}/pluginterfacesupport.cpp"
