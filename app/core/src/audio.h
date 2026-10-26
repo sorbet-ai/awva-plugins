@@ -37,6 +37,8 @@ public:
 	virtual AudioInfo info() const = 0;
 	// the device's rate, known before start (0: unknown)
 	virtual int probe_rate() = 0;
+	// the system's default output changed since the last call (the core then restarts on it)
+	virtual bool take_default_changed() { return false; }
 };
 
 std::unique_ptr<AudioOut> make_null_audio(int rate);

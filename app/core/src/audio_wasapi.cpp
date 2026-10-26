@@ -38,6 +38,40 @@ const IID kIAudioClient3 = {0x7ed4ee07, 0x8e67, 0x4cd4, {0x8c, 0x1a, 0x2b, 0x7a,
 const IID kIRenderClient = {0xf294acfc, 0x3146, 0x4483, {0xa7, 0xbf, 0xad, 0xdc, 0xa7, 0xc2, 0x60, 0xe2}};
 const GUID kFloat = {0x00000003, 0x0000, 0x0010, {0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}};
 
+// the default output changing (headphones plugged in, the user's choice): a flag, read by the UI
+// thread, which restarts the audio on the new default
+class DefaultWatch final : public IMMNotificationClient {
+public:
+	explicit DefaultWatch(std::atomic<bool>* flag) : flag_(flag) {}
+	HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** out) override {
+		if (iid == __uuidof(IUnknown) || iid == __uuidof(IMMNotificationClient)) {
+			*out = static_cast<IMMNotificationClient*>(this);
+			AddRef();
+			return S_OK;
+		}
+		*out = nullptr;
+		return E_NOINTERFACE;
+	}
+	ULONG STDMETHODCALLTYPE AddRef() override { return ++ref_; }
+	ULONG STDMETHODCALLTYPE Release() override {
+		const ULONG r = --ref_;
+		if (r == 0) delete this;
+		return r;
+	}
+	HRESULT STDMETHODCALLTYPE OnDefaultDeviceChanged(EDataFlow flow, ERole role, LPCWSTR) override {
+		if (flow == eRender && role == eConsole) flag_->store(true);
+		return S_OK;
+	}
+	HRESULT STDMETHODCALLTYPE OnDeviceStateChanged(LPCWSTR, DWORD) override { return S_OK; }
+	HRESULT STDMETHODCALLTYPE OnDeviceAdded(LPCWSTR) override { return S_OK; }
+	HRESULT STDMETHODCALLTYPE OnDeviceRemoved(LPCWSTR) override { return S_OK; }
+	HRESULT STDMETHODCALLTYPE OnPropertyValueChanged(LPCWSTR, const PROPERTYKEY) override { return S_OK; }
+
+private:
+	std::atomic<bool>* flag_;
+	std::atomic<ULONG> ref_{1};
+};
+
 template <class T> void release(T*& p) {
 	if (p) p->Release();
 	p = nullptr;
@@ -53,7 +87,20 @@ std::string utf8(const wchar_t* w) {
 
 class Wasapi : public AudioOut {
 public:
-	~Wasapi() override { stop(); }
+	Wasapi() {
+		// (the caller's thread: the UI's, COM ready; notifications come on the system's own thread)
+		if (SUCCEEDED(CoCreateInstance(kEnumerator, nullptr, CLSCTX_ALL, kIEnumerator, reinterpret_cast<void**>(&watch_en_)))) {
+			watch_ = new DefaultWatch(&changed_);
+			if (FAILED(watch_en_->RegisterEndpointNotificationCallback(watch_))) release(watch_);
+		}
+	}
+	~Wasapi() override {
+		stop();
+		if (watch_en_ && watch_) watch_en_->UnregisterEndpointNotificationCallback(watch_);
+		release(watch_);
+		release(watch_en_);
+	}
+	bool take_default_changed() override { return changed_.exchange(false); }
 
 	int probe_rate() override {
 		CoInitializeEx(nullptr, COINIT_MULTITHREADED);
@@ -235,7 +282,9 @@ private:
 
 	mutable std::mutex m_;
 	AudioInfo info_;
-	std::atomic<bool> run_{false}, opened_{false};
+	std::atomic<bool> run_{false}, opened_{false}, changed_{false};
+	IMMDeviceEnumerator* watch_en_ = nullptr;
+	DefaultWatch* watch_ = nullptr;
 	std::thread th_;
 };
 

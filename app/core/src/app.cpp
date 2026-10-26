@@ -267,6 +267,8 @@ public:
 	void midi_refresh() {
 		drain_rets();
 		if (midi_) midi_->refresh();
+		// the system's default output changed: play on the new one (faded in, as at the start)
+		if (!no_audio_ && audio_ && audio_->take_default_changed()) (void)restart_audio();
 	}
 	void midi_enable(const std::string& name, bool on) {
 		if (!midi_) return;

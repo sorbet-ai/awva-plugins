@@ -93,7 +93,8 @@ AWVA_APP_API void awva_status_get(awva_status* out);
 
 /* MIDI: [{"name","enabled","state":"open|closed|busy|failed","message"}...] */
 AWVA_APP_API const char* awva_midi_ports(void);
-AWVA_APP_API void awva_midi_refresh(void); /* the OS's ports again (call every second or two) */
+AWVA_APP_API void awva_midi_refresh(void); /* the OS's ports again, and the audio onto a new default
+                                            output (call every second or two) */
 AWVA_APP_API void awva_midi_enable(const char* name, int32_t on);
 /* UMP words straight into the sound, as from a port (tests, smoke runs) */
 AWVA_APP_API void awva_ump(const uint32_t* words, int32_t count);
