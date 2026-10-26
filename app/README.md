@@ -28,8 +28,17 @@ same design is what the plugins show in a DAW, drawn natively (`DESIGN.md`).
     poly pressure), CC74. MIDI 2.0: per-note pitch, pressure and timbre. All of it is the engine
     component's own decoding (awva's `midi_in.h`), as in the plugins. A new engine is given the
     controller's MPE Configuration Message and bend range again.
-- **Audio out:** Windows: WASAPI in shared mode (the Windows mixer and volume stay in the path;
-  there is no exclusive mode). macOS: CoreAudio's default output.
+- **Audio out:** Windows: WASAPI in shared mode by default (the Windows mixer and volume stay in
+  the path), one device period queued; following the default output. Exclusive mode on request
+  (Settings > audio output): the device to awva alone, its smallest buffer (or 256, 512 frames), the
+  first format it takes; awva then applies the Windows volume itself (the endpoint's level and mute,
+  ramped, as the mixer would; left to the device where it does it in hardware), and a device whose
+  volume can't be read plays shared. macOS: CoreAudio's default output, a 128-frame buffer.
+- **The delay, key to sound:** shown part by part (Settings; the total in the footer), each figure
+  measured or as the driver reports it: MIDI in to output (measured, min/mean/max: a message plays
+  from the next buffer rendered, under one period from its arrival), the engine's 2 ms step and
+  32-frame block, the output queued, the device's own latency. `awva_app_cli devices` asks the
+  default output what periods it offers, without opening a stream.
 
 ## Safety
 
@@ -99,6 +108,14 @@ cmake --build build/sdk --target nsc_<id>          # -> build/sdk/components/<id
 
 On Windows in a Visual Studio x64 environment (vcvars64), as this repository's `build.sh` does.
 Or `awva_add_component(<target> <id> MODULE)` in your own project.
+
+**The iteration loop:** `app/tools/iterate.sh ENGINE AWVA_DIR` builds an engine change (an awva
+checkout on the app's awva commit) into the package `<engine>-iter<n>`, written through a hidden
+folder, then checks it as the app plays it (`awva_app_cli check`: every preset finite and sounding)
+and compares it with the built-in engine, preset by preset. The running app lists it within two
+seconds (it scans the folder again when it changes; Ctrl+R / Cmd+R, or "Rescan your engines", at
+once). `--presets-only` makes a presets-only package from `presets/<engine>/`. An unchanged checkout
+gives a package that plays bit for bit as the built-in engine.
 
 **Updating:** the app loads a copy of a package's library, so you can write the folder while the
 app runs; Settings > Rescan lists it again.
