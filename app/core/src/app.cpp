@@ -39,7 +39,7 @@ namespace awva_app {
 namespace {
 
 struct Cmd {
-	enum T : int { SetParam, SetPreset, LoadText, Legato, Panic, Swap, Master } t;
+	enum T : int { SetParam, SetPreset, LoadText, Mono, Panic, Swap, Master } t;
 	int i = 0;
 	float v = 0;
 	void* p = nullptr;
@@ -194,7 +194,7 @@ public:
 			preset_ = 0;
 		}
 		ui_ = in;
-		legato_ = false;
+		mono_ = false;
 		send({Cmd::Swap, e->key.rfind("package:", 0) == 0 && e->c != builtin_of(e) ? 1 : 0, 0, in});
 		set_setting("engine", key);
 		set_setting("preset", std::to_string(preset_));
@@ -215,9 +215,9 @@ public:
 		return 0;
 	}
 	float param(int i) const { return ui_ && i >= 0 && i < ui_->d.num_params ? ui_->c.param(ui_->state, i) : 0.0f; }
-	void set_legato(bool on) {
-		legato_ = on;
-		send({Cmd::Legato, on ? 1 : 0, 0, nullptr});
+	void set_mono(bool on) {
+		mono_ = on;
+		send({Cmd::Mono, on ? 1 : 0, 0, nullptr});
 	}
 	void panic() { send({Cmd::Panic, 0, 0, nullptr}); }
 	void set_master(float db) {
@@ -251,7 +251,7 @@ public:
 			s += std::string(i ? "," : "") + "{\"name\":" + jstr(p.name) + ",\"group\":" + jstr(p.group ? p.group : "") + ",\"min\":" + jnum(p.min) +
 			    ",\"max\":" + jnum(p.max) + ",\"kind\":" + std::to_string(p.kind) + ",\"def\":" + jnum(p.def) + ",\"value\":" + jnum(param(i)) + "}";
 		}
-		s += "],\"legato\":" + std::string(legato_ ? "true" : "false") + "}";
+		s += "],\"mono\":" + std::string(mono_ ? "true" : "false") + "}";
 		return s;
 	}
 
@@ -514,7 +514,7 @@ private:
 			in->c.set_preset(in->state, c.i);
 			generation_.fetch_add(1);
 			break;
-		case Cmd::Legato: in->set_legato(c.i != 0); break;
+		case Cmd::Mono: in->set_mono(c.i != 0); break;
 		case Cmd::Panic:
 			in->c.reset(in->state);
 			in->count = 0;
@@ -616,7 +616,7 @@ private:
 	std::string engine_key_;
 	Instance* ui_ = nullptr;
 	int preset_ = -1;
-	bool legato_ = false;
+	bool mono_ = false;
 	float master_db_ = kStartDefaultDb;
 
 	// between the threads
@@ -654,14 +654,14 @@ std::string g_text;
 } // namespace
 
 // --- the C++ side (core.h) ---------------------------------------------------------------------------
-bool render_offline(const nsc_component& c, const PresetEntry* preset, bool legato, const std::vector<TimedUmp>& events, uint64_t frames,
+bool render_offline(const nsc_component& c, const PresetEntry* preset, bool mono, const std::vector<TimedUmp>& events, uint64_t frames,
     int rate, float master_db, std::vector<float>* l, std::vector<float>* r, bool safety) {
 	auto in = std::make_unique<Instance>(c);
 	if (in->init(rate) != 0) return false;
 	if (preset && preset->factory >= 0) c.set_preset(in->state, preset->factory);
 	if (preset && preset->factory < 0 && c.load_preset(in->state, preset->text.data(), static_cast<uint32_t>(preset->text.size()), nullptr) != 1)
 		return false;
-	if (legato) in->set_legato(true);
+	if (mono) in->set_mono(true);
 	Player p;
 	p.prepare(rate);
 	p.safety.set_now_db(master_db);
@@ -812,8 +812,8 @@ AWVA_APP_API const char* awva_sound(void) {
 AWVA_APP_API int32_t awva_select_preset(int32_t index) { return g_core ? g_core->select_preset(index) : -1; }
 AWVA_APP_API int32_t awva_set_param(int32_t index, float value) { return g_core ? g_core->set_param(index, value) : -1; }
 AWVA_APP_API float awva_param(int32_t index) { return g_core ? g_core->param(index) : 0.0f; }
-AWVA_APP_API void awva_set_legato(int32_t on) {
-	if (g_core) g_core->set_legato(on != 0);
+AWVA_APP_API void awva_set_mono(int32_t on) {
+	if (g_core) g_core->set_mono(on != 0);
 }
 AWVA_APP_API void awva_panic(void) {
 	if (g_core) g_core->panic();

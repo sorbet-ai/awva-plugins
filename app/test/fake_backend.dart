@@ -64,9 +64,9 @@ class FakeBackend implements AwvaBackend {
   }
 
   @override
-  void setLegato(bool on) {
-    calls.add('legato $on');
-    _sound['legato'] = on;
+  void setMono(bool on) {
+    calls.add('mono $on');
+    _sound['mono'] = on;
   }
 
   @override

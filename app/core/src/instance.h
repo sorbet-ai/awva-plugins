@@ -45,7 +45,7 @@ struct Instance {
 	void *state = nullptr, *fast = nullptr, *large = nullptr;
 	int sr = 48000;
 	int nv;
-	bool legato = false;
+	bool mono = false;
 
 	uint64_t blocks = 0;
 	int pos = NSC_BLOCK;
@@ -80,7 +80,7 @@ struct Instance {
 		clear();
 		return 0;
 	}
-	// init at another rate, the preset, values and legato kept (as the plugin's activate())
+	// init at another rate, the preset, values and mono kept (as the plugin's activate())
 	int reinit(int rate) {
 		const int preset = c.preset(state);
 		std::vector<float> values(static_cast<size_t>(d.num_params));
@@ -88,7 +88,7 @@ struct Instance {
 		if (c.init(state, fast, large, rate, nv) != 0) return -1;
 		sr = rate;
 		if (preset >= 0 && preset < d.num_presets) c.set_preset(state, preset);
-		if (legato) (void)c.mode(state, NSC_MODE_LEGATO, 1);
+		if (mono) (void)c.mode(state, NSC_MODE_LEGATO, 1);
 		for (int i = 0; i < d.num_params; i++) (void)c.set_param(state, i, values[static_cast<size_t>(i)]);
 		clear();
 		return 0;
@@ -139,8 +139,8 @@ struct Instance {
 			pos++;
 		}
 	}
-	void set_legato(bool on) {
-		legato = on;
+	void set_mono(bool on) {
+		mono = on;
 		(void)c.mode(state, NSC_MODE_LEGATO, on ? 1 : 0);
 	}
 	int param_index(const char* name) const {

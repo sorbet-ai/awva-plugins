@@ -122,8 +122,8 @@ class Controller extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setLegato(bool on) {
-    core.setLegato(on);
+  void setMono(bool on) {
+    core.setMono(on);
     sound = core.sound();
     notifyListeners();
   }

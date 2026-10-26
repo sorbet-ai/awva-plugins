@@ -391,7 +391,7 @@ class _AllParams extends StatelessWidget {
       height: AwvaSize.row,
       child: Row(children: [
         SizedBox(width: 180, child: Text('mono', style: AwvaType.body(c.text2))),
-        AwvaSwitch(value: s.legato, onChanged: k.setLegato),
+        AwvaSwitch(value: s.mono, onChanged: k.setMono),
       ]),
     ));
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows);
@@ -615,7 +615,7 @@ class _Settings extends StatelessWidget {
                 Text('one note at a time; slurs or re-tongues by how you play', style: AwvaType.small(c.text3)),
               ]),
             ),
-            AwvaSwitch(value: k.sound?.legato ?? false, onChanged: k.setLegato),
+            AwvaSwitch(value: k.sound?.mono ?? false, onChanged: k.setMono),
           ]),
           const SizedBox(height: AwvaSize.s2),
           AwvaButton(onTap: k.panic, icon: Icons.stop, label: 'All notes off'),
