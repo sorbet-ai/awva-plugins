@@ -372,6 +372,31 @@ void exclusive_volume_checks(const std::string& builtin, const std::string& scra
 	check(shared > 1e-3 && std::fabs(diff - want) < 0.01, b);
 }
 
+// a burst (1000 MIDI messages in one buffer, as a late wake-up after a dense controller gives): the
+// app spreads it over the engine's steps, so nothing is dropped; every note ends
+void burst_checks(const std::string& builtin, const std::string& scratch) {
+	const std::string o = "{\"no_audio\": true, \"midi\": false, \"settings\": \"\", \"builtin_dir\": " + jstr(builtin) + ", \"engines_dir\": " +
+	    jstr(join(scratch, "none")) + "}";
+	if (awva_start(o.c_str()) != 0 || awva_select_engine("builtin:va") != 0) return check(false, "burst: the core starts");
+	std::vector<uint32_t> w;
+	for (int n = 0; n < 10; n++) w.push_back(0x20910000u | (1u + n) << 16 | static_cast<uint32_t>(50 + n) << 8 | 100u); // (Note On, channels 2..11)
+	for (int k = 0; k < 97; k++)
+		for (int n = 0; n < 10; n++) w.push_back(0x20d10000u | (1u + n) << 16 | static_cast<uint32_t>(40 + k % 60) << 8); // (pressure)
+	for (int n = 0; n < 10; n++) w.push_back(0x20810000u | (1u + n) << 16 | static_cast<uint32_t>(50 + n) << 8 | 64u); // (Note Off)
+	for (auto& x : w) x = (x & 0xfff0ffffu) | (x & 0x000f0000u); // (channel in the status nibble)
+	awva_ump(w.data(), static_cast<int32_t>(w.size()));
+	std::this_thread::sleep_for(std::chrono::milliseconds(300));
+	awva_status a;
+	awva_status_get(&a);
+	std::this_thread::sleep_for(std::chrono::milliseconds(3000)); // (the release tails)
+	awva_status b;
+	awva_status_get(&b);
+	awva_stop();
+	char s[160];
+	std::snprintf(s, sizeof s, "burst: %zu messages in one buffer, spread over the steps: every Note Off taken (voices %d, then %d)", w.size(), a.voices, b.voices);
+	check(b.voices == 0, s);
+}
+
 void midi1_checks() {
 	const uint8_t b[] = {0x91, 60, 100, 0xd1, 50, 0xf8, 0xe1, 0x00, 0x40, 0xf0, 1, 2, 3, 0xf7, 0xb1, 74, 64};
 	const std::vector<uint32_t> w = midi1_to_ump(b, sizeof b);
@@ -392,6 +417,7 @@ int main(int argc, char** argv) {
 	package_checks(argv[1], argv[2]);
 	setup_checks(argv[1]);
 	exclusive_volume_checks(argv[1], argv[2]);
+	burst_checks(argv[1], argv[2]);
 	std::printf("%s\n", failures ? "app_tests: FAILED" : "app_tests: ok");
 	return failures ? 1 : 0;
 }

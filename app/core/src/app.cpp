@@ -10,7 +10,9 @@
 //                texts to the UI thread through another ring (no allocation, no locks)
 //   MIDI threads the OS's: each port's messages into its own ring, timestamped
 // A MIDI message plays from the next buffer rendered, at its first frame: the least delay the output
-// allows (under one period from its arrival); the engine takes it at its next 2 ms step.
+// allows (under one period from its arrival); the engine takes it at its next 2 ms step. A burst (more
+// than kPerStep in one buffer: a late wake-up, a dense controller) goes on over the next steps, in
+// order, so no step gets more than the engine's tables take (the board's sizes: 256 a step).
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -456,8 +458,9 @@ public:
 		// (in arrival order, across the ports: an insertion sort, nothing allocated)
 		for (int i = 1; i < k; i++)
 			for (int j = i; j > 0 && batch_[j].ns < batch_[j - 1].ns; j--) std::swap(batch_[j], batch_[j - 1]);
+		const uint64_t step = static_cast<uint64_t>((rate_ + 499) / 500); // (the engine's 2 ms step, frames)
 		for (int i = 0; i < k; i++) {
-			const uint64_t f = std::max(batch_[i].f, last_frame_);
+			const uint64_t f = std::max(batch_[i].f + static_cast<uint64_t>(i / kPerStep) * step, last_frame_);
 			last_frame_ = f;
 			player_.event(f, batch_[i].w);
 			// measured: from the message's time to its frame's time in this output stream
@@ -640,6 +643,7 @@ private:
 		double min = 0, mean = 0, max = 0;
 	} lat_last_;
 	static constexpr int kBatch = 2048;
+	static constexpr int kPerStep = 64; // MIDI messages placed in one engine step at most
 	Batched batch_[kBatch];
 	uint64_t last_frame_ = 0, last_host_ns_ = 0;
 
