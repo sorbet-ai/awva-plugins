@@ -80,11 +80,22 @@ class Controller extends ChangeNotifier {
     if (on != midiActive.value) midiActive.value = on;
   }
 
+  /// a brief note (the stream opened again by itself), until it times out
+  String? note;
+  DateTime _noteAt = DateTime(0);
+
   void _slowTick() {
     core.midiRefresh();
     ports = core.midiPorts();
     audio = core.audio();
+    final before = latency.recoveries;
     latency = core.latency();
+    if (latency.recoveries > before) {
+      note = 'Audio glitched and was re-opened';
+      _noteAt = DateTime.now();
+    } else if (note != null && DateTime.now().difference(_noteAt).inSeconds > 6) {
+      note = null;
+    }
     notifyListeners();
   }
 

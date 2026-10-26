@@ -92,7 +92,7 @@ class FakeBackend implements AwvaBackend {
   @override
   AudioInfo audio() => AudioInfo({
         'backend': 'WASAPI', 'device': 'Speakers', 'state': 'running', 'message': '', 'rate': 48000, 'buffer': 144, 'mode': mode, 'wanted': mode,
-        'frames': 0, 'exclusive_available': true, 'volume': mode == 'exclusive' ? 0.3 : -1,
+        'frames': 256, 'exclusive_available': true, 'volume': mode == 'exclusive' ? 0.3 : -1,
       });
   @override
   bool audioRestart() => true;
@@ -108,7 +108,7 @@ class FakeBackend implements AwvaBackend {
   LatencyInfo latency() => LatencyInfo({
         'mode': mode, 'rate': 48000, 'period_frames': 144, 'period_ms': 3.0, 'buffer_frames': 144, 'buffer_ms': 3.0, 'stream_ms': 4.2,
         'block_frames': 32, 'block_ms': 0.67, 'step_ms': 2.0, 'midi_count': 412, 'midi_min_ms': 2.1, 'midi_mean_ms': 3.0, 'midi_max_ms': 3.9,
-        'total_ms': 10.2, 'total_source': 'measured MIDI + reported output',
+        'total_ms': 10.2, 'total_source': 'measured MIDI + reported output', 'glitches': 0, 'recoveries': 0,
       });
   @override
   String setting(String key) => settings[key] ?? '';

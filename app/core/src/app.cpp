@@ -87,8 +87,8 @@ public:
 		audio_ = no_audio_ ? make_null_audio(48000) : make_device_audio();
 		AudioConfig cfg;
 		cfg.exclusive = setting("audio_mode") == "exclusive";
-		cfg.frames = 0; // (exclusive: the device's smallest buffer, unless chosen)
-		if (!setting("exclusive_frames").empty()) cfg.frames = std::max(0, std::atoi(setting("exclusive_frames").c_str()));
+		cfg.frames = 256; // (exclusive: 256 frames, about 5 ms, unless chosen; 0 is the device's smallest)
+		if (!setting("exclusive_buffer").empty()) cfg.frames = std::max(0, std::atoi(setting("exclusive_buffer").c_str()));
 		if (o.has("simulate_volume_db")) cfg.simulate_db = static_cast<float>(o.num("simulate_volume_db", 0));
 		if (no_audio_ && o.has("null_period")) cfg.frames = static_cast<int>(o.num("null_period", 256)); // (the null sink's period, tests)
 		audio_->configure(cfg);
@@ -317,6 +317,8 @@ public:
 
 	AudioInfo audio_info() const {
 		AudioInfo i = fallback_ ? fallback_->info() : (audio_ ? audio_->info() : AudioInfo{});
+		i.glitches += glitches_base_;
+		i.recoveries += recoveries_base_;
 		if (fallback_) {
 			const AudioInfo d = audio_->info();
 			i.state = AWVA_AUDIO_FAILED;
@@ -338,13 +340,37 @@ public:
 		config_.exclusive = mode == "exclusive";
 		if (frames >= 0) config_.frames = frames == 0 ? 0 : std::clamp(frames, 16, 4096); // (0: the smallest)
 		set_setting("audio_mode", config_.exclusive ? "exclusive" : "shared");
-		set_setting("exclusive_frames", std::to_string(config_.frames));
+		set_setting("exclusive_buffer", std::to_string(config_.frames));
 		audio_->configure(config_);
 		return restart_audio();
 	}
 
+	// the audio thread's glitches into <app data>/awva/audio.log, with the stream's state (UI thread)
+	void log_glitches() {
+		if (!audio_) return;
+		Glitch g[64];
+		const int k = audio_->take_glitches(g, 64);
+		if (k == 0) return;
+		const AudioInfo a = audio_info();
+		static const char* kinds[] = {"", "late wake-up", "slow render", "no event for 200 ms", "device failed"};
+		std::string s;
+		for (int i = 0; i < k; i++) {
+			char b[256];
+			std::snprintf(b, sizeof b, "%.3f s  %s  (since last %lld us, render %lld us, padding %u)  %s %s %d Hz, %d frames, period %d; %u glitches, %u re-opened\n",
+			    (g[i].ns - start_ns_) / 1e9, kinds[std::clamp(g[i].kind, 0, 4)], static_cast<long long>(g[i].dt_us), static_cast<long long>(g[i].render_us), g[i].pad,
+			    a.device.c_str(), a.mode.c_str(), a.rate, a.buffer, a.period, a.glitches, a.recoveries);
+			s += b;
+		}
+		std::string old;
+		const std::string path = join(app_data_dir(), "audio.log");
+		read_file(path, &old, 1u << 20);
+		if (old.size() > (1u << 19)) old = old.substr(old.size() - (1u << 18)); // (the last 256 KB kept)
+		write_file(path, old + s);
+	}
+
 	// the delay from a key to the speaker, part by part: each figure measured or as the driver reports it
 	std::string latency_json() {
+		log_glitches();
 		const AudioInfo a = audio_info();
 		const int64_t n = lat_n_.exchange(0);
 		const int64_t sum = lat_sum_.exchange(0), mn = lat_min_.exchange(INT64_MAX), mx = lat_max_.exchange(INT64_MIN);
@@ -365,11 +391,14 @@ public:
 		s += ",\"midi_count\":" + std::to_string(lat_last_.n) + ",\"midi_min_ms\":" + jnum(lat_last_.min) + ",\"midi_mean_ms\":" + jnum(lat_last_.mean) +
 		    ",\"midi_max_ms\":" + jnum(lat_last_.max) + ",\"midi_source\":\"measured\"";
 		s += ",\"total_ms\":" + jnum(midi + out) + ",\"total_source\":" + jstr(lat_last_.n ? "measured MIDI + reported output" : "reported output + one buffer");
-		s += ",\"volume\":" + jnum(a.volume) + "}";
+		s += ",\"volume\":" + jnum(a.volume) + ",\"glitches\":" + std::to_string(a.glitches) + ",\"recoveries\":" + std::to_string(a.recoveries) + "}";
 		return s;
 	}
 
 	int restart_audio() {
+		const AudioInfo before = audio_info(); // (the counts carry over a restart)
+		glitches_base_ = before.glitches;
+		recoveries_base_ = before.recoveries;
 		stop_audio();
 		apply_all(); // (the audio thread is stopped: the UI thread applies what it hadn't)
 		drain_rets();
@@ -424,7 +453,9 @@ public:
 				k++;
 			}
 		}
-		std::stable_sort(batch_, batch_ + k, [](const Batched& a, const Batched& b) { return a.f < b.f; });
+		// (in arrival order, across the ports: an insertion sort, nothing allocated)
+		for (int i = 1; i < k; i++)
+			for (int j = i; j > 0 && batch_[j].ns < batch_[j - 1].ns; j--) std::swap(batch_[j], batch_[j - 1]);
 		for (int i = 0; i < k; i++) {
 			const uint64_t f = std::max(batch_[i].f, last_frame_);
 			last_frame_ = f;
@@ -566,6 +597,7 @@ private:
 		return v;
 	}
 
+	uint64_t start_ns_ = now_ns();
 	Catalog catalog_;
 	Engine playing_;     // the playing engine's entry, should a rescan lose it
 	std::string folder_; // the packages folder at the last scan (Catalog::signature)
@@ -574,6 +606,7 @@ private:
 	std::map<std::string, std::string> settings_;
 	bool no_audio_ = false, shut_ = false;
 	AudioConfig config_;
+	uint32_t glitches_base_ = 0, recoveries_base_ = 0;
 	std::unique_ptr<AudioOut> audio_, fallback_;
 	std::unique_ptr<MidiIn> midi_;
 	int rate_ = 48000;

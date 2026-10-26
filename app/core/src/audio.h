@@ -26,9 +26,18 @@ struct AudioCallback {
 	static constexpr uint32_t kMaxFrames = 8192;
 };
 
+// a glitch, as the audio thread saw it: kind 1 a late wake-up (dt_us since the last), 2 a render that
+// took most of the period (render_us), 3 no event for 200 ms, 4 the device failed
+struct Glitch {
+	uint64_t ns;
+	int kind;
+	int64_t dt_us, render_us;
+	uint32_t pad;
+};
+
 struct AudioConfig {
 	bool exclusive = false; // WASAPI exclusive mode (Windows), on request only
-	int frames = 128;       // the exclusive buffer asked for, frames (the device aligns it)
+	int frames = 256;       // the exclusive buffer asked for, frames (the device aligns it; 0: its smallest)
 	float simulate_db = NAN; // the null sink: apply an exclusive endpoint volume of this level (tests)
 };
 
@@ -42,6 +51,8 @@ struct AudioInfo {
 	float stream_ms = -1;        // the device's own latency, ms, as the driver reports it (-1: unknown)
 	float volume = -1;           // exclusive: the Windows volume the app applies (linear), -1 none
 	bool exclusive_available = false;
+	uint32_t glitches = 0;   // since the start
+	uint32_t recoveries = 0; // streams opened again by themselves
 };
 
 class AudioOut {
@@ -56,6 +67,8 @@ public:
 	virtual int probe_rate() = 0;
 	// the system's default output changed since the last call (the core then restarts on it)
 	virtual bool take_default_changed() { return false; }
+	// the glitches noted since the last call (the UI thread logs them)
+	virtual int take_glitches(Glitch*, int) { return 0; }
 
 protected:
 	AudioConfig config_;

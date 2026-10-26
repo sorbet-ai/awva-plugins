@@ -19,6 +19,7 @@
 #include <windows.h>
 #include <audioclient.h>
 #include <avrt.h>
+#pragma comment(lib, "avrt.lib")
 #include <endpointvolume.h>
 #include <mmdeviceapi.h>
 #include <mmreg.h>
@@ -56,7 +57,7 @@ const GUID kPcm = {0x00000001, 0x0000, 0x0010, {0x80, 0x00, 0x00, 0xaa, 0x00, 0x
 // thread, which restarts the audio on the new default
 class DefaultWatch final : public IMMNotificationClient {
 public:
-	explicit DefaultWatch(std::atomic<bool>* flag) : flag_(flag) {}
+	DefaultWatch(std::atomic<bool>* flag, std::atomic<bool>* reopen) : flag_(flag), reopen_(reopen) {}
 	HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** out) override {
 		if (iid == __uuidof(IUnknown) || iid == __uuidof(IMMNotificationClient)) {
 			*out = static_cast<IMMNotificationClient*>(this);
@@ -79,10 +80,16 @@ public:
 	HRESULT STDMETHODCALLTYPE OnDeviceStateChanged(LPCWSTR, DWORD) override { return S_OK; }
 	HRESULT STDMETHODCALLTYPE OnDeviceAdded(LPCWSTR) override { return S_OK; }
 	HRESULT STDMETHODCALLTYPE OnDeviceRemoved(LPCWSTR) override { return S_OK; }
-	HRESULT STDMETHODCALLTYPE OnPropertyValueChanged(LPCWSTR, const PROPERTYKEY) override { return S_OK; }
+	HRESULT STDMETHODCALLTYPE OnPropertyValueChanged(LPCWSTR, const PROPERTYKEY key) override {
+		// PKEY_AudioEngine_DeviceFormat: a device's format changed (the stream is opened again on it)
+		static const GUID kFormat = {0xf19f064d, 0x082c, 0x4e27, {0xbc, 0x73, 0x68, 0x82, 0xa1, 0xbb, 0x8e, 0x4c}};
+		if (key.fmtid == kFormat && key.pid == 0) reopen_->store(true);
+		return S_OK;
+	}
 
 private:
 	std::atomic<bool>* flag_;
+	std::atomic<bool>* reopen_;
 	std::atomic<ULONG> ref_{1};
 };
 
@@ -213,7 +220,7 @@ public:
 	Wasapi() {
 		// (the caller's thread: the UI's, COM ready; notifications come on the system's own thread)
 		if (SUCCEEDED(CoCreateInstance(kEnumerator, nullptr, CLSCTX_ALL, kIEnumerator, reinterpret_cast<void**>(&watch_en_)))) {
-			watch_ = new DefaultWatch(&changed_);
+			watch_ = new DefaultWatch(&changed_, &reopen_);
 			if (FAILED(watch_en_->RegisterEndpointNotificationCallback(watch_))) release(watch_);
 		}
 	}
@@ -264,7 +271,17 @@ public:
 		std::lock_guard<std::mutex> g(m_);
 		AudioInfo i = info_;
 		if (i.mode == "exclusive") i.volume = gain_.applied();
+		i.glitches = glitches_.load();
+		i.recoveries = recoveries_.load();
 		return i;
+	}
+	int take_glitches(Glitch* out, int max) override {
+		int k = 0;
+		for (size_t r = gr_.load(std::memory_order_relaxed); k < max && r != gw_.load(std::memory_order_acquire); r++) {
+			out[k++] = gring_[r % kGlitchRing];
+			gr_.store(r + 1, std::memory_order_release);
+		}
+		return k;
 	}
 
 private:
@@ -339,10 +356,60 @@ private:
 		return hr;
 	}
 
+	// the audio thread: the stream opened, played, and opened again when it keeps glitching, when the
+	// device fails (AUDCLNT_E_*) or its format changes; without a device it asks for audio in real time
 	void thread(AudioCallback* cb) {
 		CoInitializeEx(nullptr, COINIT_MULTITHREADED);
 		DWORD task = 0;
 		HANDLE mmcss = AvSetMmThreadCharacteristicsW(L"Pro Audio", &task);
+		if (mmcss) AvSetMmThreadPriority(mmcss, AVRT_PRIORITY_CRITICAL);
+		std::vector<float> l(AudioCallback::kMaxFrames), r(AudioCallback::kMaxFrames);
+		bool first = true;
+		while (run_) {
+			const Outcome o = run_stream(cb, l.data(), r.data(), first);
+			first = false;
+			if (o == Outcome::Stopped) break;
+			if (o == Outcome::Reopen) {
+				recoveries_.fetch_add(1);
+				continue;
+			}
+			// (no device: in real time without one, until stopped; Restart audio or a new default
+			// output opens one again)
+			const int rate = info().rate > 0 ? info().rate : 48000;
+			auto next = std::chrono::steady_clock::now();
+			while (run_) {
+				constexpr uint32_t n = 256;
+				cb->render(l.data(), r.data(), n, now_ns());
+				cb->tap(l.data(), r.data(), n);
+				next += std::chrono::nanoseconds(static_cast<int64_t>(1e9 * n / rate));
+				std::this_thread::sleep_until(next);
+			}
+		}
+		if (mmcss) AvRevertMmThreadCharacteristics(mmcss);
+		CoUninitialize();
+	}
+
+	enum class Outcome { Stopped, Reopen, Failed };
+
+	// a glitch: noted (a lock-free ring the UI thread logs from) and counted; true when they keep
+	// coming (more than 3 in a second): the stream is opened again
+	bool glitch(int kind, uint64_t t, int64_t dt_us, int64_t render_us, uint32_t pad) {
+		glitches_.fetch_add(1);
+		const size_t w = gw_.load(std::memory_order_relaxed);
+		if (w - gr_.load(std::memory_order_acquire) < kGlitchRing) {
+			gring_[w % kGlitchRing] = {t, kind, dt_us, render_us, pad};
+			gw_.store(w + 1, std::memory_order_release);
+		}
+		recent_[recent_n_++ % 4] = t;
+		const bool storm = recent_n_ >= 4 && t - recent_[recent_n_ % 4] < 1000000000ull;
+		if (storm && t - last_reopen_ > 3000000000ull) {
+			last_reopen_ = t;
+			return true;
+		}
+		return false;
+	}
+
+	Outcome run_stream(AudioCallback* cb, float* l, float* r, bool first) {
 		IMMDeviceEnumerator* en = nullptr;
 		IMMDevice* dev = nullptr;
 		IAudioClient* ac = nullptr;
@@ -356,9 +423,11 @@ private:
 		VolumeWatch vol;
 		{
 			std::lock_guard<std::mutex> g(m_);
+			const std::string device = info_.device;
 			info_ = AudioInfo{};
 			info_.backend = "WASAPI";
 			info_.exclusive_available = true;
+			info_.device = device;
 		}
 		HRESULT hr = CoCreateInstance(kEnumerator, nullptr, CLSCTX_ALL, kIEnumerator, reinterpret_cast<void**>(&en));
 		if (SUCCEEDED(hr)) hr = en->GetDefaultAudioEndpoint(eRender, eConsole, &dev);
@@ -427,46 +496,64 @@ private:
 			info_.state = SUCCEEDED(hr) ? AWVA_AUDIO_RUNNING : AWVA_AUDIO_FAILED;
 			info_.message = SUCCEEDED(hr) ? note : why;
 		}
-		opened_ = true;
-		std::vector<float> l(AudioCallback::kMaxFrames), r(AudioCallback::kMaxFrames);
-		bool device = SUCCEEDED(hr);
+		if (first) opened_ = true;
+		Outcome out = SUCCEEDED(hr) ? Outcome::Stopped : Outcome::Failed;
 		const int channels = fmt.Format.nChannels;
-		auto next = std::chrono::steady_clock::now();
-		while (run_) {
-			if (device) {
-				if (WaitForSingleObject(ev, 200) != WAIT_OBJECT_0) continue;
-				UINT32 n = frames;
-				if (!exclusive) { // (shared: up to one period queued)
-					UINT32 pad = 0;
-					hr = ac->GetCurrentPadding(&pad);
-					n = SUCCEEDED(hr) && pad < target ? target - pad : 0;
+		const bool fast_copy = channels == 2 && fmt.Format.wBitsPerSample == 32 && std::memcmp(&fmt.SubFormat, &kFloat, sizeof(GUID)) == 0;
+		const uint64_t period_ns = period ? static_cast<uint64_t>(1e9 * period / rate) : 10000000ull;
+		uint64_t last = 0;
+		reopen_.store(false);
+		while (SUCCEEDED(hr) && run_) {
+			if (WaitForSingleObject(ev, 200) != WAIT_OBJECT_0) {
+				// (no event for 200 ms: the stream stalled)
+				if (glitch(3, now_ns(), 200000, 0, 0) || reopen_.exchange(false)) {
+					out = Outcome::Reopen;
+					break;
 				}
-				n = std::min<UINT32>(n, AudioCallback::kMaxFrames);
-				BYTE* p = nullptr;
-				if (SUCCEEDED(hr) && n > 0) hr = rc->GetBuffer(n, &p);
-				if (FAILED(hr)) {
-					device = false; // (unplugged, or the format changed: keep running without it)
-					set(AWVA_AUDIO_FAILED, hr == AUDCLNT_E_DEVICE_INVALIDATED ? "the audio device went away: Restart audio" : "the audio device stopped");
-					next = std::chrono::steady_clock::now();
-					continue;
-				}
-				if (n == 0) continue;
-				cb->render(l.data(), r.data(), n, now_ns());
-				if (exclusive) gain_.apply(l.data(), r.data(), n); // (the Windows volume, as the mixer would)
-				cb->tap(l.data(), r.data(), n);
-				if (channels == 2 && fmt.Format.wBitsPerSample == 32 && std::memcmp(&fmt.SubFormat, &kFloat, sizeof(GUID)) == 0) {
-					float* o = reinterpret_cast<float*>(p);
-					for (UINT32 i = 0; i < n; i++) o[2 * i] = l[i], o[2 * i + 1] = r[i];
-				} else {
-					write_samples(p, fmt, l.data(), r.data(), n);
-				}
-				rc->ReleaseBuffer(n, 0);
+				continue;
+			}
+			const uint64_t t = now_ns();
+			// late: the event more than a period and a half after the last (the device starved)
+			if (last && t - last > period_ns + period_ns / 2 + 1000000ull && glitch(1, t, static_cast<int64_t>((t - last) / 1000), 0, 0)) {
+				out = Outcome::Reopen;
+				break;
+			}
+			last = t;
+			if (reopen_.exchange(false)) { // (the device's format changed)
+				out = Outcome::Reopen;
+				break;
+			}
+			UINT32 n = frames, pad = 0;
+			if (!exclusive) { // (shared: up to one period queued)
+				hr = ac->GetCurrentPadding(&pad);
+				n = SUCCEEDED(hr) && pad < target ? target - pad : 0;
+			}
+			n = std::min<UINT32>(n, AudioCallback::kMaxFrames);
+			BYTE* p = nullptr;
+			if (SUCCEEDED(hr) && n > 0) hr = rc->GetBuffer(n, &p);
+			if (FAILED(hr)) {
+				// (unplugged, or the device changed: open it again, else without it)
+				glitch(4, t, 0, 0, 0);
+				set(AWVA_AUDIO_FAILED, hr == AUDCLNT_E_DEVICE_INVALIDATED ? "the audio device went away" : "the audio device stopped: opening it again");
+				out = hr == AUDCLNT_E_DEVICE_INVALIDATED ? Outcome::Failed : Outcome::Reopen;
+				break;
+			}
+			if (n == 0) continue;
+			cb->render(l, r, n, t);
+			if (exclusive) gain_.apply(l, r, n); // (the Windows volume, as the mixer would)
+			cb->tap(l, r, n);
+			if (fast_copy) {
+				float* o = reinterpret_cast<float*>(p);
+				for (UINT32 i = 0; i < n; i++) o[2 * i] = l[i], o[2 * i + 1] = r[i];
 			} else {
-				constexpr uint32_t n = 256;
-				cb->render(l.data(), r.data(), n, now_ns());
-				cb->tap(l.data(), r.data(), n);
-				next += std::chrono::nanoseconds(static_cast<int64_t>(1e9 * n / rate));
-				std::this_thread::sleep_until(next);
+				write_samples(p, fmt, l, r, n);
+			}
+			rc->ReleaseBuffer(n, 0);
+			// slow: the render took most of the period (the stream is about to starve)
+			const uint64_t took = now_ns() - t;
+			if (took > period_ns - period_ns / 8 && glitch(2, t, 0, static_cast<int64_t>(took / 1000), pad)) {
+				out = Outcome::Reopen;
+				break;
 			}
 		}
 		if (ac) ac->Stop();
@@ -477,14 +564,24 @@ private:
 		release(en);
 		CoTaskMemFree(mix);
 		CloseHandle(ev);
-		if (mmcss) AvRevertMmThreadCharacteristics(mmcss);
-		CoUninitialize();
+		if (out == Outcome::Reopen) {
+			std::lock_guard<std::mutex> g(m_);
+			info_.message = "audio re-opened after glitches";
+		}
+		return out;
 	}
 
 	mutable std::mutex m_;
 	AudioInfo info_;
 	EndpointGain gain_;
-	std::atomic<bool> run_{false}, opened_{false}, changed_{false};
+	std::atomic<bool> run_{false}, opened_{false}, changed_{false}, reopen_{false};
+	// the glitches: counted, and noted in a ring the UI thread logs from (audio thread: writer)
+	static constexpr size_t kGlitchRing = 64;
+	Glitch gring_[kGlitchRing];
+	std::atomic<size_t> gw_{0}, gr_{0};
+	std::atomic<uint32_t> glitches_{0}, recoveries_{0};
+	uint64_t recent_[4] = {}, last_reopen_ = 0;
+	uint32_t recent_n_ = 0;
 	std::thread th_;
 	IMMDeviceEnumerator* watch_en_ = nullptr;
 	DefaultWatch* watch_ = nullptr;

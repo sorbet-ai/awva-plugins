@@ -127,10 +127,16 @@ class LatencyInfo {
         midiMean = _d(j['midi_mean_ms']),
         midiMax = _d(j['midi_max_ms']),
         totalMs = _d(j['total_ms']),
-        totalSource = j['total_source'] as String? ?? '';
+        totalSource = j['total_source'] as String? ?? '',
+        glitches = j['glitches'] as int? ?? 0,
+        recoveries = j['recoveries'] as int? ?? 0;
   static double _d(Object? v, [double def = 0]) => (v as num?)?.toDouble() ?? def;
   final String mode, totalSource;
   final int rate, periodFrames, bufferFrames, blockFrames, midiCount;
+
+  /// glitches the audio thread saw (late wake-ups, slow renders, stalls) and the streams it opened
+  /// again by itself
+  final int glitches, recoveries;
   final double periodMs, bufferMs, streamMs, blockMs, stepMs, midiMin, midiMean, midiMax, totalMs;
 }
 

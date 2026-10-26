@@ -390,7 +390,7 @@ class _AllParams extends StatelessWidget {
     rows.add(SizedBox(
       height: AwvaSize.row,
       child: Row(children: [
-        SizedBox(width: 180, child: Text('legato', style: AwvaType.body(c.text2))),
+        SizedBox(width: 180, child: Text('mono', style: AwvaType.body(c.text2))),
         AwvaSwitch(value: s.legato, onChanged: k.setLegato),
       ]),
     ));
@@ -493,6 +493,7 @@ class _Footer extends StatelessWidget {
             const SizedBox(width: AwvaSize.s4),
             Text('CPU ${(st.cpu * 100).round()}%', style: AwvaType.small(c.text3)),
             if (st.reductionDb > 0.5) ...[const SizedBox(width: AwvaSize.s4), Text('limiter −${st.reductionDb.toStringAsFixed(1)} dB', style: AwvaType.small(c.butter))],
+            if (k.note != null) ...[const SizedBox(width: AwvaSize.s4), Text(k.note!, style: AwvaType.small(c.butter))],
             const Spacer(),
             Flexible(
               flex: 2,
@@ -564,8 +565,8 @@ class _Settings extends StatelessWidget {
               Row(children: [
                 Text('buffer', style: AwvaType.small(c.text3)),
                 const SizedBox(width: AwvaSize.s2),
-                // (0: the device's smallest buffer, the least delay; larger if it crackles)
-                for (final f in const [0, 256, 512]) ...[
+                // (256, about 5 ms, the default; 0 the device's smallest: less delay, more risk of glitches)
+                for (final f in const [0, 128, 256, 512]) ...[
                   _Segment(label: f == 0 ? 'smallest' : '$f', selected: a.frames == f, onTap: () => k.setAudioMode('exclusive', f)),
                   const SizedBox(width: 4),
                 ],
@@ -608,7 +609,12 @@ class _Settings extends StatelessWidget {
             ),
           head('play'),
           Row(children: [
-            Expanded(child: Text('Legato (one voice, slurred)', style: AwvaType.body(c.text1))),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Mono', style: AwvaType.body(c.text1)),
+                Text('one note at a time; slurs or re-tongues by how you play', style: AwvaType.small(c.text3)),
+              ]),
+            ),
             AwvaSwitch(value: k.sound?.legato ?? false, onChanged: k.setLegato),
           ]),
           const SizedBox(height: AwvaSize.s2),
@@ -667,6 +673,9 @@ class _LatencyTable extends StatelessWidget {
       row('output buffer', '${l.bufferFrames} fr · ${ms(l.bufferMs)}', 'driver'),
       row('device latency', l.streamMs >= 0 ? ms(l.streamMs) : 'not reported', 'driver'),
       row('key to sound', ms(l.totalMs), 'sum', strong: true),
+      const SizedBox(height: AwvaSize.s2),
+      row('glitches', l.recoveries > 0 ? '${l.glitches} · re-opened ${l.recoveries}×' : '${l.glitches}', 'measured'),
+      if (l.glitches > 0) Text('If they keep coming, a larger buffer helps (exclusive: 256 or 512).', style: AwvaType.small(c.text3)),
     ]);
   }
 }
