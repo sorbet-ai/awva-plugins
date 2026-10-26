@@ -12,7 +12,7 @@
 //   --exit-after S       quit after S seconds (smoke runs)
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui' show AppExitType;
+import 'dart:ui' show AppExitResponse, AppExitType;
 
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -26,6 +26,10 @@ String? _arg(List<String> args, String name) {
   return i >= 0 && i + 1 < args.length ? args[i + 1] : null;
 }
 
+// (kept for the app's life)
+// ignore: unused_element
+AppLifecycleListener? _lifecycle;
+
 void main(List<String> args) {
   WidgetsFlutterBinding.ensureInitialized();
   final options = <String, Object?>{
@@ -36,6 +40,12 @@ void main(List<String> args) {
   };
   final core = FfiBackend.start(path: _arg(args, '--core'), options: options);
   final controller = Controller(core);
+  // a window closed or the app quit: the core stops first (its threads, the probe file)
+  _lifecycle = AppLifecycleListener(onExitRequested: () async {
+    controller.dispose();
+    core.stop();
+    return AppExitResponse.exit;
+  });
   final exitAfter = double.tryParse(_arg(args, '--exit-after') ?? '');
   if (exitAfter != null) {
     Timer(Duration(milliseconds: (exitAfter * 1000).round()), () async {

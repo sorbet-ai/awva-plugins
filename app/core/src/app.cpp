@@ -126,7 +126,10 @@ public:
 		}
 		return 0;
 	}
+	~Core() override { stop(); }
 	void stop() {
+		if (shut_) return;
+		shut_ = true;
 		if (midi_) midi_->stop();
 		midi_.reset();
 		stop_audio();
@@ -462,7 +465,7 @@ private:
 	void stop_audio() {
 		if (fallback_) fallback_->stop();
 		fallback_.reset();
-		audio_->stop();
+		if (audio_) audio_->stop();
 	}
 	void probe_loop() {
 		while (probe_run_) {
@@ -496,7 +499,7 @@ private:
 	Catalog catalog_;
 	std::string builtin_dir_, user_dir_, settings_path_;
 	std::map<std::string, std::string> settings_;
-	bool no_audio_ = false;
+	bool no_audio_ = false, shut_ = false;
 	std::unique_ptr<AudioOut> audio_, fallback_;
 	std::unique_ptr<MidiIn> midi_;
 	int rate_ = 48000;
