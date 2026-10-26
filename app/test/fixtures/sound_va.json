@@ -4,7 +4,7 @@
     "label": "built in",
     "id": "va",
     "title": "Virtual Analog",
-    "version": "2caea6a",
+    "version": "ed4010d",
     "summary": "virtual analog: saw/pulse/sub oscillators, sync, ladder-style filter, envelopes (8 presets)",
     "builtin": true
   },
