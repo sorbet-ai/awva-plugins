@@ -160,7 +160,37 @@ Each check also confirms that the per-note pressure, tuning and brightness each 
 
 CPU load as a % of one core, at 48 kHz in host blocks of 128. The workload is 1 / 4 / 10 notes held, each with its pressure, tuning and brightness moving every 10 ms, and each figure is the best of 5 runs of 4 s. "component" is the bare engine component given the same UMP; the formats' extra cost over it is the wrapper's.
 
-BENCH_TABLES
+**Windows** (the GitHub windows-2022 runner, x64):
+
+| engine | component | CLAP | VST3 |
+|---|---|---|---|
+| accordion | 0.28 / 0.45 / 0.78 | 0.30 / 0.48 / 0.83 | 0.30 / 0.47 / 0.83 |
+| bowed | 0.17 / 0.62 / 1.52 | 0.20 / 0.65 / 1.57 | 0.20 / 0.65 / 1.58 |
+| brass | 0.22 / 0.81 / 1.97 | 0.24 / 0.84 / 2.03 | 0.25 / 0.86 / 2.05 |
+| ep | 0.19 / 0.30 / 0.53 | 0.22 / 0.33 / 0.58 | 0.21 / 0.34 / 0.58 |
+| modal | 0.07 / 0.20 / 0.46 | 0.08 / 0.23 / 0.51 | 0.09 / 0.23 / 0.52 |
+| reed | 0.19 / 0.67 / 1.62 | 0.20 / 0.69 / 1.68 | 0.21 / 0.70 / 1.68 |
+| sine | 0.04 / 0.11 / 0.26 | 0.06 / 0.14 / 0.30 | 0.06 / 0.14 / 0.30 |
+| trumpet | 0.42 / 1.60 / 3.90 | 0.45 / 1.63 / 3.95 | 0.45 / 1.61 / 3.95 |
+| va | 0.20 / 0.70 / 1.72 | 0.22 / 0.73 / 1.76 | 0.22 / 0.74 / 1.78 |
+| wind | 0.20 / 0.61 / 1.40 | 0.22 / 0.64 / 1.45 | 0.23 / 0.63 / 1.46 |
+
+**macOS** (the GitHub macos-15 runner, arm64):
+
+| engine | component | CLAP | VST3 | AU |
+|---|---|---|---|---|
+| accordion | 0.18 / 0.28 / 0.50 | 0.20 / 0.31 / 0.53 | 0.21 / 0.32 / 0.54 | 0.21 / 0.32 / 0.54 |
+| bowed | 0.12 / 0.40 / 1.03 | 0.13 / 0.41 / 1.08 | 0.14 / 0.44 / 1.08 | 0.14 / 0.43 / 1.05 |
+| brass | 0.14 / 0.46 / 1.12 | 0.15 / 0.47 / 1.15 | 0.16 / 0.49 / 1.16 | 0.16 / 0.46 / 1.10 |
+| ep | 0.10 / 0.19 / 0.39 | 0.11 / 0.21 / 0.42 | 0.13 / 0.23 / 0.45 | 0.12 / 0.22 / 0.41 |
+| modal | 0.06 / 0.17 / 0.40 | 0.08 / 0.19 / 0.43 | 0.08 / 0.20 / 0.44 | 0.08 / 0.19 / 0.43 |
+| reed | 0.12 / 0.44 / 1.04 | 0.14 / 0.45 / 1.08 | 0.15 / 0.45 / 1.03 | 0.14 / 0.43 / 1.02 |
+| sine | 0.04 / 0.09 / 0.19 | 0.05 / 0.11 / 0.22 | 0.05 / 0.11 / 0.23 | 0.05 / 0.11 / 0.22 |
+| trumpet | 0.32 / 1.24 / 3.02 | 0.34 / 1.29 / 3.06 | 0.36 / 1.26 / 3.10 | 0.35 / 1.21 / 3.00 |
+| va | 0.21 / 0.76 / 1.81 | 0.22 / 0.78 / 1.90 | 0.22 / 0.78 / 1.93 | 0.22 / 0.80 / 1.82 |
+| wind | 0.15 / 0.45 / 1.07 | 0.16 / 0.47 / 1.13 | 0.17 / 0.45 / 1.11 | 0.19 / 0.58 / 1.18 |
+
+Every engine runs 10 voices in under 4 % of one core, in every format. Each format adds about 0.02 to 0.15 % over the bare component, within the runners' noise.
 
 **Latency:** every format reports 0 samples, since the plugin never delays its output. A Note On sounds at the engine's next 2 ms step, so 0 to 91 frames at 48 kHz, plus the engine's own onset (32 for modal, 64 for ep, about 150 for brass and trumpet). This is the same in every format.
 
