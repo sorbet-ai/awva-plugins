@@ -84,13 +84,13 @@ AWVA_APP_API int32_t awva_rescan(void);
 AWVA_APP_API int32_t awva_select_engine(const char* key);
 
 /* the sound: {"engine": {...}, "presets": [{"name","source"}...], "preset": i, "heroes": [param
- * indices], "params": [{"name","group","min","max","kind","def","value"}...], "legato": bool} */
+ * indices], "params": [{"name","group","min","max","kind","def","value"}...], "mono": bool} */
 AWVA_APP_API const char* awva_sound(void);
 /* a preset of the list awva_sound() gives; 0, or -1 (refused: awva_last_error()) */
 AWVA_APP_API int32_t awva_select_preset(int32_t index);
 AWVA_APP_API int32_t awva_set_param(int32_t index, float value);
 AWVA_APP_API float awva_param(int32_t index);
-AWVA_APP_API void awva_set_legato(int32_t on);
+AWVA_APP_API void awva_set_mono(int32_t on);
 AWVA_APP_API void awva_panic(void); /* every note off, the engine reset */
 
 /* the master level, dB (-60 .. +6; -60 is silence) */

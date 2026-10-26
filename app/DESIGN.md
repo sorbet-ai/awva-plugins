@@ -101,7 +101,7 @@ DM Sans (bundled, OFL, variable), tabular figures everywhere.
 │              ◜◝        ◜◝        ◜◝        ◜◝                                            │
 │            body amt   damp     vibrato  ensemble                                         │
 │                                                                                          │
-│            Every parameter ›          (grouped slider rows, then "play": legato)         │
+│            Every parameter ›          (grouped slider rows, then "play": mono)           │
 ├ footer 32 ───────────────────────────────────────────────────────────────────────────────┤
 │ ● Speakers · 48.0 kHz · 144 frames   CPU 4%   limiter −2.1 dB        MIDI in: controller │
 └──────────────────────────────────────────────────────────────────────────────────────────┘
@@ -116,7 +116,7 @@ DM Sans (bundled, OFL, variable), tabular figures everywhere.
   right: the MIDI inputs open, or a port's problem in butter.
 - **Settings panel** (380 px, over the right edge): Appearance; Audio output (device, backend,
   rate, buffer, "Follows the system volume", Restart audio); MIDI inputs (each with its dot and a
-  switch, a busy port's message under it); Play (legato, All notes off); Your engines (the folder,
+  switch, a busy port's message under it); Play (mono, All notes off); Your engines (the folder,
   Rescan, each package with its engine and version, or why it was refused).
 - **Engine menu**: "built in" (one line per engine), then "your engines" (the package's label,
   the engine's title at the right; a refused package dimmed with its reason).
