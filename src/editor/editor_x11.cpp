@@ -318,9 +318,11 @@ void view_destroy(View* v) {
 bool view_attach(View* v, void* parent) {
 	const Window p = static_cast<Window>(reinterpret_cast<uintptr_t>(parent));
 	if (!p) return false;
+	// (XSync, not XFlush: the window is on the server, in the host's window, when this returns, so
+	// the host's own X connection sees it there)
 	if (v->win) {
 		XReparentWindow(v->dpy, v->win, p, 0, 0);
-		XFlush(v->dpy);
+		XSync(v->dpy, False);
 		return true;
 	}
 	v->win = XCreateSimpleWindow(v->dpy, p, 0, 0, v->w, v->h, 0, 0, 0);
@@ -328,7 +330,7 @@ bool view_attach(View* v, void* parent) {
 	XSelectInput(v->dpy, v->win,
 	    ExposureMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask | LeaveWindowMask | StructureNotifyMask);
 	XMapWindow(v->dpy, v->win);
-	XFlush(v->dpy);
+	XSync(v->dpy, False);
 	v->dirty = true;
 	return true;
 }

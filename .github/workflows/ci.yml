@@ -235,7 +235,9 @@ jobs:
           CC=clang CXX=clang++ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build
       - name: bit-identity proofs
-        run: xvfb-run -a ctest --test-dir build -L plugin --output-on-failure -j 4
+        # One Xvfb for the parallel tests. -noreset: by default Xvfb resets when its last client leaves and
+        # refuses connections while it does, so a test that ends could fail one that's starting.
+        run: xvfb-run -a -s "-noreset -screen 0 1280x1024x24" ctest --test-dir build -L plugin --output-on-failure -j 4
       - name: app core checks
         run: ctest --test-dir build -L app --output-on-failure -j 4
       - uses: subosito/flutter-action@v2

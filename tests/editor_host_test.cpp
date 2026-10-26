@@ -6,8 +6,9 @@
 // The CLAP gui extension: the API, the size, resizing to the minimum. On Windows the editor goes
 // into a hidden window and a knob is dragged with the mouse (window messages): the next process()
 // must give the host a gesture begin, the value and a gesture end for that parameter, and the
-// plugin must have the new value. On macOS and Linux: create and destroy (no window; Linux: an X
-// server, e.g. Xvfb). Opens no audio device.
+// plugin must have the new value. On Linux (an X server, e.g. Xvfb) the editor goes into the host's
+// window, made on the host's own X connection, which stays open for the whole run as a host's does.
+// On macOS: create and destroy (no window). Opens no audio device.
 #if defined(_WIN32) && !defined(NOMINMAX)
 #define NOMINMAX
 #endif
@@ -27,6 +28,10 @@
 #endif
 
 #include "awva_plugin/design_tokens.h"
+
+#if !defined(_WIN32) && !defined(__APPLE__)
+#include <X11/Xlib.h>
+#endif
 
 namespace {
 
@@ -118,6 +123,15 @@ int main(int argc, char** argv) {
 	const char* api = CLAP_WINDOW_API_X11;
 #endif
 	check(gui->is_api_supported(p, api, false) && !gui->is_api_supported(p, api, true), std::string("embedded in the host's window (") + api + "), not floating");
+#if !defined(_WIN32) && !defined(__APPLE__)
+	// The host's X connection, open from before the editor's first and until after its last, as a
+	// host's is. The editor has its own connection; were it the X server's only client, closing it
+	// would leave the server with none, and Xvfb resets then and refuses connections while it does:
+	// the editor created again could find no server.
+	Display* host_dpy = XOpenDisplay(nullptr);
+	check(host_dpy != nullptr, "the host's X connection");
+	if (!host_dpy) return 1;
+#endif
 	p->activate(p, 48000, 1, 4096);
 	p->start_processing(p);
 	check(gui->create(p, api, false), "created");
@@ -176,7 +190,22 @@ int main(int argc, char** argv) {
 	gui->hide(p);
 	gui->destroy(p);
 	DestroyWindow(parent);
+#elif defined(__APPLE__)
+	gui->destroy(p);
+	check(true, "destroyed");
 #else
+	// the host's window, on the server before the editor's connection names it as its parent
+	const Window parent = XCreateSimpleWindow(host_dpy, DefaultRootWindow(host_dpy), 0, 0, 900, 600, 0, 0, 0);
+	XSync(host_dpy, False);
+	clap_window win = {CLAP_WINDOW_API_X11, {}};
+	win.x11 = parent;
+	check(gui->set_parent(p, &win) && gui->show(p), "attached to the host's window");
+	Window root_ret = 0, parent_ret = 0, *children = nullptr;
+	unsigned int nchildren = 0;
+	XQueryTree(host_dpy, parent, &root_ret, &parent_ret, &children, &nchildren);
+	check(nchildren == 1, "the editor's window is the host window's child");
+	if (children) XFree(children);
+	gui->hide(p);
 	gui->destroy(p);
 	check(true, "destroyed");
 #endif
@@ -187,6 +216,10 @@ int main(int argc, char** argv) {
 	p->deactivate(p);
 	p->destroy(p);
 	entry->deinit();
+#if !defined(_WIN32) && !defined(__APPLE__)
+	XDestroyWindow(host_dpy, parent);
+	XCloseDisplay(host_dpy);
+#endif
 	std::printf("%s\n", failures ? "editor_host_test: FAILED" : "editor_host_test: ok");
 	return failures ? 1 : 0;
 }
