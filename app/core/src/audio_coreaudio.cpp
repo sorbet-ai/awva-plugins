@@ -70,11 +70,20 @@ public:
 				if (CFStringGetCString(name, b, sizeof b, kCFStringEncodingUTF8)) info_.device = b;
 				CFRelease(name);
 			}
-			UInt32 frames = 256;
+			UInt32 frames = 128;
 			AudioObjectPropertyAddress fa = {kAudioDevicePropertyBufferFrameSize, kAudioObjectPropertyScopeGlobal, 0 /* (main) */};
 			AudioObjectSetPropertyData(dev, &fa, 0, nullptr, sizeof frames, &frames);
 			size = sizeof frames;
-			if (AudioObjectGetPropertyData(dev, &fa, 0, nullptr, &size, &frames) == noErr) info_.buffer = static_cast<int>(frames);
+			if (AudioObjectGetPropertyData(dev, &fa, 0, nullptr, &size, &frames) == noErr) info_.buffer = info_.period = static_cast<int>(frames);
+			// the device's own latency and safety offset (output scope), as the driver reports them
+			UInt32 lat = 0, safety = 0;
+			size = sizeof lat;
+			AudioObjectPropertyAddress la = {kAudioDevicePropertyLatency, kAudioObjectPropertyScopeOutput, 0 /* (main) */};
+			const bool l1 = AudioObjectGetPropertyData(dev, &la, 0, nullptr, &size, &lat) == noErr;
+			la.mSelector = kAudioDevicePropertySafetyOffset;
+			size = sizeof safety;
+			const bool l2 = AudioObjectGetPropertyData(dev, &la, 0, nullptr, &size, &safety) == noErr;
+			if (l1 || l2) info_.stream_ms = static_cast<float>((lat + safety) * 1000.0 / std::max(1, probe_rate()));
 		}
 		if (st == noErr) {
 			AudioStreamBasicDescription f = {};
@@ -129,6 +138,7 @@ private:
 		for (UInt32 done = 0; done < n;) {
 			const UInt32 k = std::min<UInt32>(n - done, AudioCallback::kMaxFrames);
 			s->cb_->render(l + done, r + done, k, t);
+			s->cb_->tap(l + done, r + done, k);
 			done += k;
 		}
 		return noErr;

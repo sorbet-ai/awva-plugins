@@ -102,6 +102,7 @@ void Catalog::scan(const std::string& builtin_dir, const std::string& user_dir) 
 	}
 	// the packages
 	for (const std::string& folder : list_dir(user_dir, true)) {
+		if (folder.empty() || folder[0] == '.') continue; // (a package being written: it appears when renamed)
 		const std::string dir = join(user_dir, folder);
 		Engine e;
 		e.key = "package:" + folder;
@@ -153,6 +154,15 @@ void Catalog::scan(const std::string& builtin_dir, const std::string& user_dir) 
 		out.push_back(std::move(e));
 	}
 	engines_ = std::move(out);
+}
+
+std::string Catalog::signature(const std::string& user_dir) {
+	std::string s;
+	for (const std::string& folder : list_dir(user_dir, true)) {
+		if (folder.empty() || folder[0] == '.') continue;
+		s += folder + "{" + file_stamp(join(user_dir, folder)) + "}";
+	}
+	return s;
 }
 
 const Engine* Catalog::find(const std::string& key) const {

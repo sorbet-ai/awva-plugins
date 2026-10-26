@@ -30,13 +30,17 @@ class Controller extends ChangeNotifier {
   Sound? sound;
   List<MidiPortInfo> ports = [];
   AudioInfo audio = AudioInfo(const {});
+  LatencyInfo latency = LatencyInfo(const {});
+
+  /// the one-time note on exclusive mode, until the user has read it
+  bool exclusiveNote = false;
   String enginesDir = '';
   ThemeChoice theme = ThemeChoice.system;
   String? message; // the last refusal, shown until the next action
 
   /// the status: its own notifier, so the meters repaint without the whole screen
   final status = ValueNotifier<Status>(const Status());
-  int _generation = -1, _midiSeen = 0;
+  int _generation = -1, _midiSeen = 0, _catalog = -1;
 
   /// MIDI activity: the time of the last message seen
   final midiActive = ValueNotifier<bool>(false);
@@ -47,6 +51,7 @@ class Controller extends ChangeNotifier {
     sound = core.sound();
     ports = core.midiPorts();
     audio = core.audio();
+    latency = core.latency();
     enginesDir = core.enginesDir();
     status.value = core.status();
     notifyListeners();
@@ -60,6 +65,13 @@ class Controller extends ChangeNotifier {
       sound = core.sound();
       notifyListeners();
     }
+    if (s.catalog != _catalog) {
+      // (a package came, went or changed: the core scanned again)
+      _catalog = s.catalog;
+      engines = core.catalog();
+      sound = core.sound();
+      notifyListeners();
+    }
     if (s.midiEvents != _midiSeen) {
       _midiSeen = s.midiEvents;
       _midiAt = DateTime.now();
@@ -68,10 +80,22 @@ class Controller extends ChangeNotifier {
     if (on != midiActive.value) midiActive.value = on;
   }
 
+  /// a brief note (the stream opened again by itself), until it times out
+  String? note;
+  DateTime _noteAt = DateTime(0);
+
   void _slowTick() {
     core.midiRefresh();
     ports = core.midiPorts();
     audio = core.audio();
+    final before = latency.recoveries;
+    latency = core.latency();
+    if (latency.recoveries > before) {
+      note = 'Audio glitched and was re-opened';
+      _noteAt = DateTime.now();
+    } else if (note != null && DateTime.now().difference(_noteAt).inSeconds > 6) {
+      note = null;
+    }
     notifyListeners();
   }
 
@@ -125,6 +149,21 @@ class Controller extends ChangeNotifier {
   void enablePort(String name, bool on) {
     core.midiEnable(name, on);
     ports = core.midiPorts();
+    notifyListeners();
+  }
+
+  /// shared (the default) or exclusive, with its buffer; the first time exclusive is chosen, a note
+  void setAudioMode(String mode, [int frames = -1]) {
+    if (mode == 'exclusive' && core.setting('exclusive_noted') != 'yes') exclusiveNote = true;
+    message = core.setAudioMode(mode, frames) ? null : core.lastError();
+    audio = core.audio();
+    latency = core.latency();
+    notifyListeners();
+  }
+
+  void noteExclusiveRead() {
+    exclusiveNote = false;
+    core.setSetting('exclusive_noted', 'yes');
     notifyListeners();
   }
 

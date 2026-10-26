@@ -92,9 +92,52 @@ class AudioInfo {
         state = j['state'] as String? ?? 'off',
         message = j['message'] as String? ?? '',
         rate = j['rate'] as int? ?? 0,
-        buffer = j['buffer'] as int? ?? 0;
+        buffer = j['buffer'] as int? ?? 0,
+        mode = j['mode'] as String? ?? 'shared',
+        wanted = j['wanted'] as String? ?? 'shared',
+        frames = j['frames'] as int? ?? 128,
+        exclusiveAvailable = j['exclusive_available'] as bool? ?? false,
+        volume = (j['volume'] as num?)?.toDouble() ?? -1;
   final String backend, device, state, message;
-  final int rate, buffer;
+
+  /// what plays ("shared", "exclusive", "null") and what was asked for
+  final String mode, wanted;
+  final int rate, buffer, frames;
+  final bool exclusiveAvailable;
+
+  /// exclusive: the Windows volume the app applies (linear); -1 none
+  final double volume;
+}
+
+/// the delay from a key to the output, part by part (awva_latency)
+class LatencyInfo {
+  LatencyInfo(Map<String, dynamic> j)
+      : mode = j['mode'] as String? ?? '',
+        rate = j['rate'] as int? ?? 0,
+        periodFrames = j['period_frames'] as int? ?? 0,
+        periodMs = _d(j['period_ms']),
+        bufferFrames = j['buffer_frames'] as int? ?? 0,
+        bufferMs = _d(j['buffer_ms']),
+        streamMs = _d(j['stream_ms'], -1),
+        blockFrames = j['block_frames'] as int? ?? 32,
+        blockMs = _d(j['block_ms']),
+        stepMs = _d(j['step_ms']),
+        midiCount = j['midi_count'] as int? ?? 0,
+        midiMin = _d(j['midi_min_ms']),
+        midiMean = _d(j['midi_mean_ms']),
+        midiMax = _d(j['midi_max_ms']),
+        totalMs = _d(j['total_ms']),
+        totalSource = j['total_source'] as String? ?? '',
+        glitches = j['glitches'] as int? ?? 0,
+        recoveries = j['recoveries'] as int? ?? 0;
+  static double _d(Object? v, [double def = 0]) => (v as num?)?.toDouble() ?? def;
+  final String mode, totalSource;
+  final int rate, periodFrames, bufferFrames, blockFrames, midiCount;
+
+  /// glitches the audio thread saw (late wake-ups, slow renders, stalls) and the streams it opened
+  /// again by itself
+  final int glitches, recoveries;
+  final double periodMs, bufferMs, streamMs, blockMs, stepMs, midiMin, midiMean, midiMax, totalMs;
 }
 
 class Status {
@@ -113,10 +156,14 @@ class Status {
     this.xruns = 0,
     this.faults = 0,
     this.engineStopped = false,
+    this.catalog = 0,
   });
   final double peakL, peakR, reductionDb, masterDb, cpu;
   final int voices, audioState, sampleRate, bufferFrames, midiEvents, generation, xruns, faults;
   final bool engineStopped;
+
+  /// changes when the engines were scanned again (a package came or went)
+  final int catalog;
 }
 
 abstract class AwvaBackend {
@@ -136,6 +183,8 @@ abstract class AwvaBackend {
   void midiEnable(String name, bool on);
   AudioInfo audio();
   bool audioRestart();
+  bool setAudioMode(String mode, int frames);
+  LatencyInfo latency();
   String setting(String key);
   void setSetting(String key, String value);
   String lastError();
@@ -153,6 +202,8 @@ final class _Status extends Struct {
   external int midiEvents, generation, xruns, faults;
   @Int32()
   external int engineStopped;
+  @Uint32()
+  external int catalog;
 }
 
 typedef _Str = Pointer<Utf8> Function();
@@ -177,6 +228,8 @@ class FfiBackend implements AwvaBackend {
         _midiRefresh = _lib.lookupFunction<Void Function(), void Function()>('awva_midi_refresh'),
         _midiEnable = _lib.lookupFunction<Void Function(Pointer<Utf8>, Int32), void Function(Pointer<Utf8>, int)>('awva_midi_enable'),
         _audioRestart = _lib.lookupFunction<Int32 Function(), int Function()>('awva_audio_restart'),
+        _setAudioMode = _lib.lookupFunction<Int32 Function(Pointer<Utf8>, Int32), int Function(Pointer<Utf8>, int)>('awva_set_audio_mode'),
+        _latency = _lib.lookupFunction<_StrN, _Str>('awva_latency'),
         _setting = _lib.lookupFunction<Pointer<Utf8> Function(Pointer<Utf8>), Pointer<Utf8> Function(Pointer<Utf8>)>('awva_setting'),
         _setSetting = _lib.lookupFunction<Void Function(Pointer<Utf8>, Pointer<Utf8>), void Function(Pointer<Utf8>, Pointer<Utf8>)>(
             'awva_set_setting'),
@@ -204,7 +257,8 @@ class FfiBackend implements AwvaBackend {
   }
 
   final DynamicLibrary _lib;
-  final _Str _catalog, _enginesDir, _sound, _midiPorts, _audio, _lastError;
+  final _Str _catalog, _enginesDir, _sound, _midiPorts, _audio, _lastError, _latency;
+  final int Function(Pointer<Utf8>, int) _setAudioMode;
   final int Function() _rescan, _audioRestart;
   final int Function(Pointer<Utf8>) _selectEngine;
   final int Function(int) _selectPreset;
@@ -278,6 +332,7 @@ class FfiBackend implements AwvaBackend {
       xruns: s.xruns,
       faults: s.faults,
       engineStopped: s.engineStopped != 0,
+      catalog: s.catalog,
     );
   }
 
@@ -291,6 +346,10 @@ class FfiBackend implements AwvaBackend {
   AudioInfo audio() => AudioInfo(_json(_audio) as Map<String, dynamic>);
   @override
   bool audioRestart() => _audioRestart() == 0;
+  @override
+  bool setAudioMode(String mode, int frames) => _withStr(mode, (p) => _setAudioMode(p, frames)) == 0;
+  @override
+  LatencyInfo latency() => LatencyInfo(_json(_latency) as Map<String, dynamic>);
   @override
   String setting(String key) => _withStr(key, (p) => _setting(p).toDartString());
   @override

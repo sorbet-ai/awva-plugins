@@ -32,6 +32,9 @@ bool render_offline(const nsc_component& c, const PresetEntry* preset, bool lega
 // Note Off. MIDI 1.0 in UMP (type 2), as WinMM gives it to the core.
 std::vector<TimedUmp> mpe_controller_performance(int rate, double seconds);
 
+// what the default output offers, asked without opening a stream (JSON)
+std::string query_output_json();
+
 // MIDI 1.0 bytes (whole messages) as MIDI 1.0 in UMP (type 2); system messages skipped
 std::vector<uint32_t> midi1_to_ump(const uint8_t* bytes, size_t n);
 

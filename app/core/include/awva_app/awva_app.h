@@ -52,6 +52,8 @@ typedef struct awva_status {
 	uint32_t faults;        /* blocks muted for a broken engine output (non-finite, or past the awva
 	                           contract's bound of 8): the engine was reset */
 	int32_t engine_stopped; /* 1: the package's engine broke the bound and is stopped (choose another) */
+	uint32_t catalog;       /* changes when the engines were scanned again (a package came or went):
+	                           read awva_catalog() again */
 } awva_status;
 
 AWVA_APP_API int32_t awva_abi(void);
@@ -62,7 +64,10 @@ AWVA_APP_API int32_t awva_abi(void);
  *                             ~/Library/Application Support/awva/engines)
  *   "builtin_dir": "<path>"   the built-in engines (default: beside the core)
  *   "settings": "<path>"      the settings file (default: <app data>/awva/settings.json; "" none)
- *   "probe_wav": "<path>"     every output sample, post safety, also into this WAV (float 32)
+ *   "probe_wav": "<path>"     every output sample as it goes to the device (after the safety chain
+ *                             and, in exclusive mode, the Windows volume) into this WAV (float 32)
+ *   "simulate_volume_db": dB  with no_audio: apply an exclusive output's Windows volume at this
+ *                             level (tests: the level matches shared's at that volume)
  *   "midi": false             no MIDI ports opened
  * Returns 0, or -1 if it was started already. */
 AWVA_APP_API int32_t awva_start(const char* options_json);
@@ -72,7 +77,8 @@ AWVA_APP_API void awva_stop(void);
 AWVA_APP_API const char* awva_catalog(void);
 /* the packages folder the core scans */
 AWVA_APP_API const char* awva_engines_dir(void);
-/* scan the packages folder again; returns the number of engines */
+/* scan the packages folder again; returns the number of engines (awva_midi_refresh() also does it
+ * by itself when the folder changed) */
 AWVA_APP_API int32_t awva_rescan(void);
 /* play an engine by its catalog key; 0, or -1 (unknown or refused) */
 AWVA_APP_API int32_t awva_select_engine(const char* key);
@@ -101,9 +107,21 @@ AWVA_APP_API void awva_ump(const uint32_t* words, int32_t count);
 /* MIDI 1.0 bytes straight into the sound, as from a port (one or more whole messages) */
 AWVA_APP_API void awva_midi1(const uint8_t* bytes, int32_t count);
 
-/* audio: {"backend","device","state","message","rate","buffer"} */
+/* audio: {"backend","device","state","message","rate","buffer","mode","wanted","frames",
+ * "exclusive_available","volume"}: mode is what plays ("shared", "exclusive", "null"), wanted what
+ * was asked for (an exclusive request the device refused plays shared, message says why) */
 AWVA_APP_API const char* awva_audio(void);
 AWVA_APP_API int32_t awva_audio_restart(void);
+/* the output mode: "shared" (the default) or "exclusive" (Windows: the device to this app alone,
+ * the Windows volume applied by the app; frames: the buffer asked for, 0 the device's smallest, -1
+ * keeps it); restarts the
+ * audio, faded in. Kept for the next start. */
+AWVA_APP_API int32_t awva_set_audio_mode(const char* mode, int32_t frames);
+/* the delay from a key to the output, part by part, each with its source ("measured", "reported by
+ * the driver"): {"mode","rate","period_frames","period_ms","buffer_frames","buffer_ms","stream_ms",
+ * "block_frames","block_ms","step_ms","midi_count","midi_min_ms","midi_mean_ms","midi_max_ms",
+ * "total_ms",...}; the MIDI figures over the messages since the last call */
+AWVA_APP_API const char* awva_latency(void);
 
 /* settings the UI keeps (e.g. "theme"): a string, "" when unset */
 AWVA_APP_API const char* awva_setting(const char* key);

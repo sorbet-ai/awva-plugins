@@ -156,6 +156,17 @@ std::string join(const std::string& a, const std::string& b) {
 	return (P(a) / P(b)).u8string();
 }
 
+std::string file_stamp(const std::string& dir) {
+	std::string s;
+	std::error_code ec;
+	for (fs::recursive_directory_iterator it(P(dir), ec), end; !ec && it != end; it.increment(ec)) {
+		if (!it->is_regular_file(ec)) continue;
+		const auto t = fs::last_write_time(it->path(), ec).time_since_epoch().count();
+		s += it->path().filename().u8string() + ":" + std::to_string(it->file_size(ec)) + ":" + std::to_string(static_cast<long long>(t)) + ";";
+	}
+	return s;
+}
+
 const char* library_suffix() {
 #if defined(_WIN32)
 	return ".dll";

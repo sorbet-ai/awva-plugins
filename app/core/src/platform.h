@@ -26,6 +26,7 @@ bool make_dirs(const std::string& path);
 std::vector<std::string> list_dir(const std::string& path, bool dirs); // names, sorted
 std::string join(const std::string& a, const std::string& b);
 const char* library_suffix(); // ".dll", ".dylib"
+std::string file_stamp(const std::string& dir); // every file under dir: its name, size and time
 
 // a single-producer single-consumer ring of T (N a power of 2)
 template <class T, size_t N> class Ring {
