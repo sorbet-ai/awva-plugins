@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 
@@ -38,7 +39,14 @@ struct Glitch {
 struct AudioConfig {
 	bool exclusive = false; // WASAPI exclusive mode (Windows), on request only
 	int frames = 256;       // the exclusive buffer asked for, frames (the device aligns it; 0: its smallest)
+	// what earlier streams learned per endpoint (its id): the exclusive buffer it sustains, frames, or
+	// -1 shared only (buffer_policy.h; Bluetooth endpoints)
+	std::map<std::string, int> learned;
 	float simulate_db = NAN; // the null sink: apply an exclusive endpoint volume of this level (tests)
+	// the null sink as a fake exclusive endpoint (tests): its bus ("bluetooth", "usb", "other"; ""
+	// none), the least time between its wake-ups (ms: a late wake-up whenever a period is shorter)
+	std::string simulate_bus;
+	double simulate_wake_ms = 0;
 };
 
 struct AudioInfo {
@@ -51,6 +59,9 @@ struct AudioInfo {
 	float stream_ms = -1;        // the device's own latency, ms, as the driver reports it (-1: unknown)
 	float volume = -1;           // exclusive: the Windows volume the app applies (linear), -1 none
 	bool exclusive_available = false;
+	std::string endpoint;    // the endpoint's id ("" unknown)
+	std::string bus = "other"; // "bluetooth", "usb", "other"
+	int learned = 0;         // the exclusive buffer this endpoint sustains (frames; -1 shared only; 0 none)
 	uint32_t glitches = 0;   // since the start
 	uint32_t recoveries = 0; // streams opened again by themselves
 };

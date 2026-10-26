@@ -33,6 +33,7 @@
 #include "player.h"
 #include "nsc/load.h"
 #include "nsc/package.h"
+#include "buffer_policy.h"
 #include "endpoint_gain.h"
 #include "safety.h"
 
@@ -397,6 +398,105 @@ void burst_checks(const std::string& builtin, const std::string& scratch) {
 	check(b.voices == 0, s);
 }
 
+// a Bluetooth endpoint's exclusive buffer (buffer_policy.h): the bus from the endpoint's devnode and
+// topology; the buffer raised on its glitches, or shared; a wired or USB endpoint's exactly as asked
+void bluetooth_policy_checks() {
+	check(bus_of("BTHENUM", "{2}.\\\\?\\bthenum#{0000110b-0000-1000-8000-00805f9b34fb}_localmfg&0002#7&1a2b3c4d&0&001122334455_c00000000#{6994ad04-93ef-11d0-a3cc-00a0c9223196}\\src") ==
+	              Bus::Bluetooth &&
+	          bus_of("", "{2}.\\\\?\\bthhfenum#bthhfpaudio#8&2b8a0b4&0&97#{6994ad04-93ef-11d0-a3cc-00a0c9223196}\\singlelinewaveout") == Bus::Bluetooth &&
+	          bus_of("BTHLEDevice", "") == Bus::Bluetooth && bus_of("USB", "{2}.\\\\?\\usb#vid_1235&pid_8211&mi_00#9&1c2b3d4&0&0000#{6994ad04-93ef-11d0-a3cc-00a0c9223196}\\speaker") == Bus::Usb &&
+	          bus_of("HDAUDIO", "{2}.\\\\?\\hdaudio#func_01&ven_10ec&dev_0257#4&2fd1ab66&0&0001#{6994ad04-93ef-11d0-a3cc-00a0c9223196}\\elineoutwave") == Bus::Other &&
+	          bus_of("", "") == Bus::Other,
+	    "endpoints: Bluetooth (A2DP, hands-free, LE), USB and wired told apart by their bus drivers' names");
+	{
+		EndpointBuffer w;
+		w.endpoint("usb", Bus::Usb, 0);
+		bool none = w.frames(144, 144, 480) == 144 && w.frames(0, 144, 480) == 144 && w.frames(64, 144, 480) == 144 && w.frames(256, 144, 480) == 256;
+		for (uint64_t t = 0; t < 10; t++) none = none && w.glitch(t * 1000000ull, 144) == EndpointBuffer::Action::None;
+		check(none && !w.shared_only() && w.learned() == 0 && w.note(true, 144).empty(),
+		    "endpoints: a wired or USB endpoint's exclusive buffer is the one asked for (the device's smallest at least), glitches or not");
+	}
+	{
+		EndpointBuffer bt;
+		bt.endpoint("bt", Bus::Bluetooth, 0);
+		const bool start = bt.frames(144, 144, 480) == 480 && bt.frames(0, 144, 480) == 480 && bt.frames(1024, 144, 480) == 1024;
+		bt.frames(144, 144, 480);
+		const auto a1 = bt.glitch(1000000000ull, 480), a2 = bt.glitch(1500000000ull, 480);
+		const bool raised = a1 == EndpointBuffer::Action::None && a2 == EndpointBuffer::Action::StepUp && bt.learned() == 960 && bt.frames(144, 144, 480) == 960;
+		bt.endpoint("bt", Bus::Bluetooth, 0); // (the stream opened again: the count starts over, what was learned stays)
+		const auto b1 = bt.glitch(100000000000ull, 960), b2 = bt.glitch(131000000000ull, 960); // (31 s apart: not a rate)
+		const auto b3 = bt.glitch(132000000000ull, 960);
+		const bool shared = b1 == EndpointBuffer::Action::None && b2 == EndpointBuffer::Action::None && b3 == EndpointBuffer::Action::Shared && bt.shared_only() &&
+		    bt.note(true, 480).find("playing shared") != std::string::npos && bt.note(false, 480).empty();
+		EndpointBuffer again;
+		again.endpoint("bt", Bus::Bluetooth, -1);
+		check(start && raised && shared && again.shared_only(),
+		    "endpoints: a Bluetooth endpoint starts at its default period, 2 glitches in 30 s double the buffer, past twice the period it plays shared; "
+		    "what it learned is taken by the next start");
+	}
+}
+
+// the null sink as a fake endpoint on a bus, waking at most every wake_ms; exclusive at 144 frames
+// asked for; the audio state after a second
+Json fake_endpoint(const std::string& builtin, const std::string& scratch, const char* bus, int wake_ms, const std::string& settings, bool ask) {
+	const std::string o = "{\"no_audio\": true, \"midi\": false, \"settings\": " + jstr(settings) + ", \"builtin_dir\": " + jstr(builtin) +
+	    ", \"engines_dir\": " + jstr(join(scratch, "none")) + ", \"simulate_bus\": " + jstr(bus) + ", \"simulate_wake_ms\": " + std::to_string(wake_ms) + "}";
+	Json j;
+	if (awva_start(o.c_str()) != 0 || awva_select_engine("builtin:sine") != 0) return j;
+	if (ask) awva_set_audio_mode("exclusive", 144);
+	std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+	Json lat;
+	if (!Json::parse(awva_latency(), &lat) || !Json::parse(awva_audio(), &j)) j = Json{};
+	if (j.type == Json::Object) {
+		j.o["latency_buffer_frames"] = lat.o["buffer_frames"];
+		j.o["glitches"] = lat.o["glitches"];
+		j.o["recoveries"] = lat.o["recoveries"];
+	}
+	awva_stop();
+	return j;
+}
+
+void bluetooth_checks(const std::string& builtin, const std::string& scratch) {
+	const std::string settings = join(scratch, "bt-settings.json");
+	std::remove(settings.c_str());
+	// a Bluetooth endpoint waking every 20 ms: 480 frames (10 ms) come late, 960 (20 ms) play
+	Json a = fake_endpoint(builtin, scratch, "bluetooth", 20, settings, true);
+	char s[400];
+	std::snprintf(s, sizeof s, "Bluetooth, wakes every 20 ms: exclusive asked at 144 frames plays %s at %d frames (latency's buffer %d), learned %d, \"%s\"",
+	    a.str("mode").c_str(), static_cast<int>(a.num("buffer", 0)), static_cast<int>(a.num("latency_buffer_frames", 0)), static_cast<int>(a.num("learned", 0)),
+	    a.str("message").c_str());
+	check(a.str("mode") == "exclusive" && a.num("buffer", 0) == 960 && a.num("latency_buffer_frames", 0) == 960 && a.num("learned", 0) == 960 &&
+	          a.str("bus") == "bluetooth" && a.str("message").find("raised to 960") != std::string::npos && a.num("recoveries", 0) == 1,
+	    s);
+	std::string saved;
+	read_file(settings, &saved, 1u << 16);
+	check(saved.find("\"exclusive_buffer_learned:fake-endpoint\": \"960\"") != std::string::npos, "Bluetooth: the buffer it sustains is kept in the settings");
+	// the next start: at 960 at once, no glitch
+	Json b = fake_endpoint(builtin, scratch, "bluetooth", 20, settings, false);
+	std::snprintf(s, sizeof s, "Bluetooth: the next start plays %s at %d frames at once (%d glitches)", b.str("mode").c_str(), static_cast<int>(b.num("buffer", 0)),
+	    static_cast<int>(b.num("glitches", -1)));
+	check(b.str("mode") == "exclusive" && b.num("buffer", 0) == 960 && b.num("glitches", -1) == 0, s);
+	// one waking every 40 ms: no buffer up to twice its period plays: shared, with the notice
+	std::remove(settings.c_str());
+	Json c = fake_endpoint(builtin, scratch, "bluetooth", 40, settings, true);
+	std::snprintf(s, sizeof s, "Bluetooth, wakes every 40 ms: plays %s at %d frames, wanted %s, learned %d, \"%s\"", c.str("mode").c_str(),
+	    static_cast<int>(c.num("buffer", 0)), c.str("wanted").c_str(), static_cast<int>(c.num("learned", 0)), c.str("message").c_str());
+	check(c.str("mode") == "shared" && c.str("wanted") == "exclusive" && c.num("buffer", 0) == 480 && c.num("learned", 0) == -1 &&
+	          c.str("message") == "Bluetooth output: exclusive mode glitched up to 960 frames, playing shared",
+	    s);
+	read_file(settings, &saved, 1u << 16);
+	check(saved.find("\"exclusive_buffer_learned:fake-endpoint\": \"shared\"") != std::string::npos, "Bluetooth: shared only is kept in the settings");
+	// a USB endpoint waking every 20 ms: exactly as asked (144 frames), its glitches counted, nothing raised
+	std::remove(settings.c_str());
+	Json d = fake_endpoint(builtin, scratch, "usb", 20, settings, true);
+	std::snprintf(s, sizeof s, "USB, wakes every 20 ms: plays %s at %d frames as asked, %d glitches counted, %d re-opened, learned %d", d.str("mode").c_str(),
+	    static_cast<int>(d.num("buffer", 0)), static_cast<int>(d.num("glitches", 0)), static_cast<int>(d.num("recoveries", -1)), static_cast<int>(d.num("learned", -9)));
+	check(d.str("mode") == "exclusive" && d.num("buffer", 0) == 144 && d.num("glitches", 0) > 10 && d.num("recoveries", -1) == 0 && d.num("learned", -9) == 0 &&
+	          d.str("message").empty(),
+	    s);
+	std::remove(settings.c_str());
+}
+
 void midi1_checks() {
 	const uint8_t b[] = {0x91, 60, 100, 0xd1, 50, 0xf8, 0xe1, 0x00, 0x40, 0xf0, 1, 2, 3, 0xf7, 0xb1, 74, 64};
 	const std::vector<uint32_t> w = midi1_to_ump(b, sizeof b);
@@ -418,6 +518,8 @@ int main(int argc, char** argv) {
 	setup_checks(argv[1]);
 	exclusive_volume_checks(argv[1], argv[2]);
 	burst_checks(argv[1], argv[2]);
+	bluetooth_policy_checks();
+	bluetooth_checks(argv[1], argv[2]);
 	std::printf("%s\n", failures ? "app_tests: FAILED" : "app_tests: ok");
 	return failures ? 1 : 0;
 }

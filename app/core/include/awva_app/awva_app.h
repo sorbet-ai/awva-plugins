@@ -68,6 +68,10 @@ AWVA_APP_API int32_t awva_abi(void);
  *                             and, in exclusive mode, the Windows volume) into this WAV (float 32)
  *   "simulate_volume_db": dB  with no_audio: apply an exclusive output's Windows volume at this
  *                             level (tests: the level matches shared's at that volume)
+ *   "simulate_bus": "<bus>"   with no_audio: the null sink as a fake endpoint on that bus
+ *                             ("bluetooth", "usb", "other"), exclusive on request, periods 3 and
+ *                             10 ms; "simulate_wake_ms": its least time between wake-ups (tests: a
+ *                             Bluetooth endpoint's buffer raised on its late wake-ups)
  *   "midi": false             no MIDI ports opened
  * Returns 0, or -1 if it was started already. */
 AWVA_APP_API int32_t awva_start(const char* options_json);
@@ -108,8 +112,11 @@ AWVA_APP_API void awva_ump(const uint32_t* words, int32_t count);
 AWVA_APP_API void awva_midi1(const uint8_t* bytes, int32_t count);
 
 /* audio: {"backend","device","state","message","rate","buffer","mode","wanted","frames",
- * "exclusive_available","volume"}: mode is what plays ("shared", "exclusive", "null"), wanted what
- * was asked for (an exclusive request the device refused plays shared, message says why) */
+ * "exclusive_available","volume","bus","learned"}: mode is what plays ("shared", "exclusive",
+ * "null"), wanted what was asked for (an exclusive request the device refused plays shared, message
+ * says why); bus the endpoint's ("bluetooth", "usb", "other"); learned the exclusive buffer a
+ * Bluetooth endpoint sustains (frames; -1 shared only; 0 none), raised on its glitches and kept for
+ * the next start (asking for exclusive mode again measures it again) */
 AWVA_APP_API const char* awva_audio(void);
 AWVA_APP_API int32_t awva_audio_restart(void);
 /* the output mode: "shared" (the default) or "exclusive" (Windows: the device to this app alone,

@@ -92,6 +92,13 @@ public:
 		cfg.frames = 256; // (exclusive: 256 frames, about 5 ms, unless chosen; 0 is the device's smallest)
 		if (!setting("exclusive_buffer").empty()) cfg.frames = std::max(0, std::atoi(setting("exclusive_buffer").c_str()));
 		if (o.has("simulate_volume_db")) cfg.simulate_db = static_cast<float>(o.num("simulate_volume_db", 0));
+		if (no_audio_) { // (the null sink as a fake endpoint, tests: buffer_policy.h)
+			cfg.simulate_bus = o.str("simulate_bus", "");
+			cfg.simulate_wake_ms = o.num("simulate_wake_ms", 0);
+		}
+		// what earlier streams learned per endpoint: the exclusive buffer it sustains, or shared only
+		for (const auto& [k, v] : settings_)
+			if (k.rfind(kLearned, 0) == 0 && !v.empty()) cfg.learned[k.substr(std::strlen(kLearned))] = v == "shared" ? -1 : std::atoi(v.c_str());
 		if (no_audio_ && o.has("null_period")) cfg.frames = static_cast<int>(o.num("null_period", 256)); // (the null sink's period, tests)
 		audio_->configure(cfg);
 		config_ = cfg;
@@ -335,11 +342,19 @@ public:
 		return "{\"backend\":" + jstr(i.backend) + ",\"device\":" + jstr(i.device) + ",\"state\":" + jstr(names[std::clamp(i.state, 0, 3)]) +
 		    ",\"message\":" + jstr(i.message) + ",\"rate\":" + std::to_string(i.rate) + ",\"buffer\":" + std::to_string(i.buffer) +
 		    ",\"mode\":" + jstr(i.mode) + ",\"wanted\":" + jstr(config_.exclusive ? "exclusive" : "shared") + ",\"frames\":" + std::to_string(config_.frames) +
-		    ",\"exclusive_available\":" + (i.exclusive_available ? "true" : "false") + ",\"volume\":" + jnum(i.volume) + "}";
+		    ",\"exclusive_available\":" + (i.exclusive_available ? "true" : "false") + ",\"volume\":" + jnum(i.volume) +
+		    ",\"bus\":" + jstr(i.bus) + ",\"learned\":" + std::to_string(i.learned) + "}";
 	}
 	// the output mode: "shared" (the default) or "exclusive" with a buffer of frames; restarts the audio
 	int set_audio_mode(const std::string& mode, int frames) {
 		config_.exclusive = mode == "exclusive";
+		if (config_.exclusive) { // (asked again: the endpoint's buffer measured again)
+			const AudioInfo a = audio_info();
+			if (!a.endpoint.empty()) {
+				config_.learned.erase(a.endpoint);
+				erase_setting(kLearned + a.endpoint);
+			}
+		}
 		if (frames >= 0) config_.frames = frames == 0 ? 0 : std::clamp(frames, 16, 4096); // (0: the smallest)
 		set_setting("audio_mode", config_.exclusive ? "exclusive" : "shared");
 		set_setting("exclusive_buffer", std::to_string(config_.frames));
@@ -370,9 +385,21 @@ public:
 		write_file(path, old + s);
 	}
 
+	// what the stream learned about its endpoint (a Bluetooth endpoint's buffer, or shared only) into
+	// the settings, for the next start (UI thread)
+	void remember_endpoint() {
+		if (!audio_) return;
+		const AudioInfo a = audio_->info();
+		if (a.endpoint.empty() || a.learned == 0) return;
+		const std::string v = a.learned < 0 ? "shared" : std::to_string(a.learned);
+		config_.learned[a.endpoint] = a.learned;
+		if (setting(kLearned + a.endpoint) != v) set_setting(kLearned + a.endpoint, v);
+	}
+
 	// the delay from a key to the speaker, part by part: each figure measured or as the driver reports it
 	std::string latency_json() {
 		log_glitches();
+		remember_endpoint();
 		const AudioInfo a = audio_info();
 		const int64_t n = lat_n_.exchange(0);
 		const int64_t sum = lat_sum_.exchange(0), mn = lat_min_.exchange(INT64_MAX), mx = lat_max_.exchange(INT64_MIN);
@@ -401,7 +428,9 @@ public:
 		const AudioInfo before = audio_info(); // (the counts carry over a restart)
 		glitches_base_ = before.glitches;
 		recoveries_base_ = before.recoveries;
+		remember_endpoint();
 		stop_audio();
+		audio_->configure(config_); // (with what the stream learned)
 		apply_all(); // (the audio thread is stopped: the UI thread applies what it hadn't)
 		drain_rets();
 		const int r = audio_->probe_rate(); // (exclusive mode may run at another rate than the mixer)
@@ -421,6 +450,12 @@ public:
 	}
 	void set_setting(const std::string& k, const std::string& v) {
 		settings_[k] = v;
+		save_settings();
+	}
+	void erase_setting(const std::string& k) {
+		if (settings_.erase(k)) save_settings();
+	}
+	void save_settings() {
 		if (settings_path_.empty()) return;
 		std::string s = "{";
 		for (const auto& [a, b] : settings_) s += std::string(s.size() > 1 ? "," : "") + "\n  " + jstr(a) + ": " + jstr(b);
@@ -607,6 +642,7 @@ private:
 	uint32_t catalog_gen_ = 0;
 	std::string builtin_dir_, user_dir_, settings_path_;
 	std::map<std::string, std::string> settings_;
+	static constexpr const char* kLearned = "exclusive_buffer_learned:"; // + the endpoint's id
 	bool no_audio_ = false, shut_ = false;
 	AudioConfig config_;
 	uint32_t glitches_base_ = 0, recoveries_base_ = 0;

@@ -11,6 +11,8 @@
 //     it (IAudioEndpointVolume: the level in dB as a gain, mute; 1 where the device does it in
 //     hardware), ramped, updated on the endpoint's notifications. A device whose volume can't be
 //     read, or that takes no exclusive format, plays shared, and the state says why.
+// A Bluetooth endpoint (its bus, from its devnode and topology: wasapi_endpoint.h) gets no exclusive
+// buffer it can't sustain: buffer_policy.h raises it on its glitches, or plays shared and says so.
 // If the device goes away the thread keeps asking for audio in real time (as the null sink), so the
 // engine keeps running. The latency the driver reports (GetStreamLatency) is in info().
 #if defined(_WIN32)
@@ -36,8 +38,10 @@
 
 #include "audio.h"
 #include "awva_app/awva_app.h"
+#include "buffer_policy.h"
 #include "endpoint_gain.h"
 #include "platform.h"
+#include "wasapi_endpoint.h"
 
 namespace awva_app {
 
@@ -149,14 +153,6 @@ private:
 	bool registered_ = false;
 };
 
-std::string utf8(const wchar_t* w) {
-	if (!w) return {};
-	const int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, nullptr, 0, nullptr, nullptr);
-	std::string s(static_cast<size_t>(n > 0 ? n - 1 : 0), '\0');
-	WideCharToMultiByte(CP_UTF8, 0, w, -1, s.data(), n, nullptr, nullptr);
-	return s;
-}
-
 // a format as a WAVEFORMATEXTENSIBLE: float32, or integer of bits in a container of bytes
 WAVEFORMATEXTENSIBLE make_format(int rate, int channels, DWORD mask, bool fl, int bits, int container) {
 	WAVEFORMATEXTENSIBLE f{};
@@ -245,7 +241,9 @@ public:
 		    SUCCEEDED(dev->Activate(kIAudioClient, CLSCTX_ALL, nullptr, reinterpret_cast<void**>(&ac))) && SUCCEEDED(ac->GetMixFormat(&mix))) {
 			rate = static_cast<int>(mix->nSamplesPerSec);
 			WAVEFORMATEXTENSIBLE f;
-			if (config_.exclusive && exclusive_format(ac, mix, &f)) rate = static_cast<int>(f.Format.nSamplesPerSec);
+			const auto learned = config_.learned.find(endpoint_id(dev).id);
+			const bool shared_only = learned != config_.learned.end() && learned->second < 0;
+			if (config_.exclusive && !shared_only && exclusive_format(ac, mix, &f)) rate = static_cast<int>(f.Format.nSamplesPerSec);
 		}
 		CoTaskMemFree(mix);
 		release(ac);
@@ -257,6 +255,7 @@ public:
 	bool start(AudioCallback* cb) override {
 		stop();
 		run_ = true;
+		policy_ = EndpointBuffer{}; // (what was learned comes from config_.learned again)
 		th_ = std::thread([this, cb] { thread(cb); });
 		// wait until the device is open (or failed), so info() is meaningful on return
 		for (int k = 0; k < 400 && !opened_.load(); k++) std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -335,8 +334,10 @@ private:
 		REFERENCE_TIME def = 0, mn = 0;
 		(*ac)->GetDevicePeriod(&def, &mn);
 		const double rate = fmt->Format.nSamplesPerSec;
-		// (frames 0: the device's smallest buffer)
+		// (frames 0: the device's smallest buffer; a Bluetooth endpoint's: what it sustains)
 		REFERENCE_TIME want = config_.frames > 0 ? static_cast<REFERENCE_TIME>(std::llround(config_.frames * 1e7 / rate)) : mn;
+		const int f = policy_.frames(config_.frames, static_cast<int>(std::llround(mn * rate / 1e7)), static_cast<int>(std::llround(def * rate / 1e7)));
+		if (policy_.bus() == Bus::Bluetooth) want = static_cast<REFERENCE_TIME>(std::llround(f * 1e7 / rate));
 		want = std::max(want, mn);
 		hr = (*ac)->Initialize(AUDCLNT_SHAREMODE_EXCLUSIVE, AUDCLNT_STREAMFLAGS_EVENTCALLBACK, want, want, &fmt->Format, nullptr);
 		if (hr == AUDCLNT_E_BUFFER_SIZE_NOT_ALIGNED) { // (the device's size, from a new client)
@@ -409,6 +410,15 @@ private:
 		return false;
 	}
 
+	// a glitch of the endpoint in an exclusive stream of frames: true when the policy opens the stream
+	// again (a Bluetooth endpoint's buffer raised, or shared)
+	bool step_up(uint64_t t, UINT32 frames) {
+		if (policy_.glitch(t, static_cast<int>(frames)) == EndpointBuffer::Action::None) return false;
+		std::lock_guard<std::mutex> g(m_);
+		info_.learned = policy_.learned();
+		return true;
+	}
+
 	Outcome run_stream(AudioCallback* cb, float* l, float* r, bool first) {
 		IMMDeviceEnumerator* en = nullptr;
 		IMMDevice* dev = nullptr;
@@ -439,10 +449,18 @@ private:
 				PropVariantInit(&v);
 				if (SUCCEEDED(ps->GetValue(kFriendlyName, &v)) && v.vt == VT_LPWSTR) {
 					std::lock_guard<std::mutex> g(m_);
-					info_.device = utf8(v.pwszVal);
+					info_.device = wide_to_utf8(v.pwszVal);
 				}
 				PropVariantClear(&v);
 				ps->Release();
+			}
+			const EndpointId id = endpoint_id(dev);
+			const auto learned = config_.learned.find(id.id);
+			policy_.endpoint(id.id, id.bus, learned == config_.learned.end() ? 0 : learned->second);
+			{
+				std::lock_guard<std::mutex> g(m_);
+				info_.endpoint = id.id;
+				info_.bus = bus_name(id.bus);
 			}
 			IAudioClient* probe = nullptr;
 			hr = dev->Activate(kIAudioClient, CLSCTX_ALL, nullptr, reinterpret_cast<void**>(&probe));
@@ -450,7 +468,7 @@ private:
 			release(probe);
 			if (FAILED(hr)) why = "the audio device can't be opened";
 		}
-		if (SUCCEEDED(hr) && config_.exclusive) {
+		if (SUCCEEDED(hr) && config_.exclusive && !policy_.shared_only()) {
 			// exclusive only with the Windows volume applied by the app
 			if (!vol.open(dev, &gain_)) {
 				note = "the Windows volume can't be read: playing shared";
@@ -479,6 +497,7 @@ private:
 		const bool have_lat = SUCCEEDED(hr) && SUCCEEDED(ac->GetStreamLatency(&lat));
 		const int rate = SUCCEEDED(hr) ? static_cast<int>(fmt.Format.nSamplesPerSec) : (mix ? static_cast<int>(mix->nSamplesPerSec) : 48000);
 		if (exclusive) period = frames;
+		if (SUCCEEDED(hr) && note.empty()) note = policy_.note(config_.exclusive, static_cast<int>(frames));
 		if (!exclusive && period == 0 && SUCCEEDED(hr)) { // (no IAudioClient3 period: the engine's own)
 			REFERENCE_TIME def = 0, mn = 0;
 			if (SUCCEEDED(ac->GetDevicePeriod(&def, &mn))) period = static_cast<UINT32>(std::llround(def / 1e7 * fmt.Format.nSamplesPerSec));
@@ -493,6 +512,7 @@ private:
 			info_.buffer = static_cast<int>(frames);
 			info_.period = static_cast<int>(period);
 			info_.stream_ms = have_lat ? static_cast<float>(lat / 1e4) : -1.0f;
+			info_.learned = policy_.learned();
 			info_.state = SUCCEEDED(hr) ? AWVA_AUDIO_RUNNING : AWVA_AUDIO_FAILED;
 			info_.message = SUCCEEDED(hr) ? note : why;
 		}
@@ -506,7 +526,10 @@ private:
 		while (SUCCEEDED(hr) && run_) {
 			if (WaitForSingleObject(ev, 200) != WAIT_OBJECT_0) {
 				// (no event for 200 ms: the stream stalled)
-				if (glitch(3, now_ns(), 200000, 0, 0) || reopen_.exchange(false)) {
+				const uint64_t at = now_ns();
+				const bool storm = glitch(3, at, 200000, 0, 0);
+				const bool stepped = exclusive && step_up(at, frames); // (every glitch counted by the policy)
+				if (storm || stepped || reopen_.exchange(false)) {
 					out = Outcome::Reopen;
 					break;
 				}
@@ -514,9 +537,13 @@ private:
 			}
 			const uint64_t t = now_ns();
 			// late: the event more than a period and a half after the last (the device starved)
-			if (last && t - last > period_ns + period_ns / 2 + 1000000ull && glitch(1, t, static_cast<int64_t>((t - last) / 1000), 0, 0)) {
-				out = Outcome::Reopen;
-				break;
+			if (last && t - last > period_ns + period_ns / 2 + 1000000ull) {
+				const bool storm = glitch(1, t, static_cast<int64_t>((t - last) / 1000), 0, 0);
+				const bool stepped = exclusive && step_up(t, frames);
+				if (storm || stepped) {
+					out = Outcome::Reopen;
+					break;
+				}
 			}
 			last = t;
 			if (reopen_.exchange(false)) { // (the device's format changed)
@@ -574,6 +601,7 @@ private:
 	mutable std::mutex m_;
 	AudioInfo info_;
 	EndpointGain gain_;
+	EndpointBuffer policy_; // (the audio thread's, between start and stop)
 	std::atomic<bool> run_{false}, opened_{false}, changed_{false}, reopen_{false};
 	// the glitches: counted, and noted in a ring the UI thread logs from (audio thread: writer)
 	static constexpr size_t kGlitchRing = 64;

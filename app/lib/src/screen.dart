@@ -473,6 +473,9 @@ class _Footer extends StatelessWidget {
     final open = k.ports.where((p) => p.state == 'open').map((p) => p.name).toList();
     final busy = k.ports.where((p) => p.state == 'busy' || p.state == 'failed').toList();
     final a = k.audio;
+    // exclusive asked for, shared playing (a Bluetooth output that glitched at every buffer, a volume
+    // that can't be read, a device that refused): the reason, in one line
+    final fallback = a.state == 'running' && a.wanted == 'exclusive' && a.mode != 'exclusive' && a.message.isNotEmpty;
     return Container(
       height: AwvaSize.footer,
       padding: const EdgeInsets.symmetric(horizontal: AwvaSize.s4),
@@ -494,6 +497,10 @@ class _Footer extends StatelessWidget {
             Text('CPU ${(st.cpu * 100).round()}%', style: AwvaType.small(c.text3)),
             if (st.reductionDb > 0.5) ...[const SizedBox(width: AwvaSize.s4), Text('limiter −${st.reductionDb.toStringAsFixed(1)} dB', style: AwvaType.small(c.butter))],
             if (k.note != null) ...[const SizedBox(width: AwvaSize.s4), Text(k.note!, style: AwvaType.small(c.butter))],
+            if (fallback) ...[
+              const SizedBox(width: AwvaSize.s4),
+              Flexible(child: Text(a.message, maxLines: 1, overflow: TextOverflow.ellipsis, style: AwvaType.small(c.butter))),
+            ],
             const Spacer(),
             Flexible(
               flex: 2,
@@ -560,7 +567,14 @@ class _Settings extends StatelessWidget {
               const SizedBox(width: 4),
               _Segment(label: 'Exclusive', selected: a.wanted == 'exclusive', onTap: () => k.setAudioMode('exclusive')),
             ]),
-            if (a.wanted == 'exclusive') ...[
+            if (a.wanted == 'exclusive' && a.bus == 'bluetooth') ...[
+              // (a Bluetooth output: no buffer offered it can't sustain; the app raises it on glitches)
+              const SizedBox(height: AwvaSize.s2),
+              if (a.mode == 'exclusive')
+                Text('buffer ${a.buffer} frames, set for Bluetooth: raised when it glitches', style: AwvaType.small(c.text3))
+              else
+                AwvaButton(onTap: () => k.setAudioMode('exclusive'), icon: Icons.refresh, label: 'Try exclusive again'),
+            ] else if (a.wanted == 'exclusive') ...[
               const SizedBox(height: AwvaSize.s2),
               Row(children: [
                 Text('buffer', style: AwvaType.small(c.text3)),

@@ -19,10 +19,12 @@ Future<void> _fonts() async {
   await loader.load();
 }
 
-Future<FakeBackend> _pump(WidgetTester t, {Brightness b = Brightness.light, String engine = 'bowed', Size size = const Size(1040, 640)}) async {
+Future<FakeBackend> _pump(WidgetTester t,
+    {Brightness b = Brightness.light, String engine = 'bowed', Size size = const Size(1040, 640), void Function(FakeBackend)? setup}) async {
   t.view.physicalSize = size;
   t.view.devicePixelRatio = 1;
   final core = FakeBackend(engine: engine);
+  setup?.call(core);
   final k = Controller(core, poll: false);
   await t.pumpWidget(AwvaApp(controller: k, brightness: b));
   await t.runAsync(() async {
@@ -96,6 +98,33 @@ void main() {
     expect(core.settings['exclusive_noted'], 'yes');
     await t.tap(find.text('256'));
     expect(core.calls, contains('audio exclusive 256'));
+  });
+
+  testWidgets('a Bluetooth output: no buffer choices, the buffer the app set; a fallback to shared in the footer', (t) async {
+    final core = await _pump(t,
+        size: const Size(1040, 900),
+        setup: (c) => c
+          ..device = 'Headphones (Bluetooth)'
+          ..bus = 'bluetooth'
+          ..mode = 'exclusive'
+          ..buffer = 960
+          ..learned = 960
+          ..audioMessage = 'Bluetooth output: the buffer raised to 960 frames after glitches');
+    await t.tap(find.bySemanticsLabel('settings'));
+    await t.pumpAndSettle();
+    expect(find.text('buffer 960 frames, set for Bluetooth: raised when it glitches'), findsOneWidget);
+    expect(find.text('256'), findsNothing);
+    expect(find.text('smallest'), findsNothing);
+    core
+      ..plays = 'shared'
+      ..buffer = 480
+      ..learned = -1
+      ..audioMessage = 'Bluetooth output: exclusive mode glitched up to 960 frames, playing shared';
+    await t.tap(find.text('Restart audio')); // (the state read again)
+    await t.pumpAndSettle();
+    expect(find.text('Bluetooth output: exclusive mode glitched up to 960 frames, playing shared'), findsNWidgets(2)); // (the footer and settings)
+    await t.tap(find.text('Try exclusive again'));
+    expect(core.calls, contains('audio exclusive -1'));
   });
 
   testWidgets('the theme follows the OS, and the choice is kept by the core', (t) async {

@@ -97,8 +97,15 @@ class AudioInfo {
         wanted = j['wanted'] as String? ?? 'shared',
         frames = j['frames'] as int? ?? 128,
         exclusiveAvailable = j['exclusive_available'] as bool? ?? false,
-        volume = (j['volume'] as num?)?.toDouble() ?? -1;
+        volume = (j['volume'] as num?)?.toDouble() ?? -1,
+        bus = j['bus'] as String? ?? 'other',
+        learned = j['learned'] as int? ?? 0;
   final String backend, device, state, message;
+
+  /// the endpoint's bus ("bluetooth", "usb", "other"), and the exclusive buffer the app learned it
+  /// sustains (frames; -1 shared only; 0 none): a Bluetooth endpoint's buffer is the app's choice
+  final String bus;
+  final int learned;
 
   /// what plays ("shared", "exclusive", "null") and what was asked for
   final String mode, wanted;

@@ -91,9 +91,13 @@ class FakeBackend implements AwvaBackend {
   void midiEnable(String name, bool on) => calls.add('midi $name $on');
   @override
   AudioInfo audio() => AudioInfo({
-        'backend': 'WASAPI', 'device': 'Speakers', 'state': 'running', 'message': '', 'rate': 48000, 'buffer': 144, 'mode': mode, 'wanted': mode,
-        'frames': 256, 'exclusive_available': true, 'volume': mode == 'exclusive' ? 0.3 : -1,
+        'backend': 'WASAPI', 'device': device, 'state': 'running', 'message': audioMessage, 'rate': 48000, 'buffer': buffer, 'mode': plays ?? mode,
+        'wanted': mode, 'frames': 256, 'exclusive_available': true, 'volume': (plays ?? mode) == 'exclusive' ? 0.3 : -1, 'bus': bus, 'learned': learned,
       });
+  // the output: a device on a bus; plays: what plays when it isn't what was asked for
+  String device = 'Speakers', bus = 'other', audioMessage = '';
+  String? plays;
+  int buffer = 144, learned = 0;
   @override
   bool audioRestart() => true;
   String mode = 'shared';

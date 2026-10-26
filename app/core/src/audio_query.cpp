@@ -16,6 +16,8 @@
 #include <audioclient.h>
 #include <endpointvolume.h>
 #include <mmdeviceapi.h>
+
+#include "wasapi_endpoint.h"
 #endif
 
 namespace awva_app {
@@ -34,6 +36,8 @@ std::string query_output_json() {
 	    SUCCEEDED(en->GetDefaultAudioEndpoint(eRender, eConsole, &dev)) &&
 	    SUCCEEDED(dev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, reinterpret_cast<void**>(&ac))) && SUCCEEDED(ac->GetMixFormat(&mix))) {
 		const double rate = mix->nSamplesPerSec;
+		const EndpointId id = endpoint_id(dev);
+		s += "\"bus\":" + jstr(bus_name(id.bus)) + ",\"enumerator\":" + jstr(id.enumerator) + ",\"connected\":" + jstr(id.connected) + ",";
 		s += "\"rate\":" + std::to_string(mix->nSamplesPerSec) + ",\"channels\":" + std::to_string(mix->nChannels) + ",\"bits\":" + std::to_string(mix->wBitsPerSample);
 		REFERENCE_TIME def = 0, mn = 0;
 		if (SUCCEEDED(ac->GetDevicePeriod(&def, &mn)))

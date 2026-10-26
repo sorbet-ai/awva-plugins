@@ -33,7 +33,12 @@ same design is what the plugins show in a DAW, drawn natively (`DESIGN.md`).
   (Settings > audio output): the device to awva alone, its smallest buffer (or 256, 512 frames), the
   first format it takes; awva then applies the Windows volume itself (the endpoint's level and mute,
   ramped, as the mixer would; left to the device where it does it in hardware), and a device whose
-  volume can't be read plays shared. macOS: CoreAudio's default output, a 128-frame buffer.
+  volume can't be read plays shared. A Bluetooth output (its bus driver, BTHENUM or BTHLE, from the
+  endpoint's devnode and topology) offers no buffer choices: its wake-ups come in the radio's bursts,
+  so its buffer starts at the device's default period, doubles on its glitches (2 in 30 s), and past
+  twice that period it plays shared, the reason in the footer; what it learned is kept for the next
+  start ("Try exclusive again" measures it again). Wired and USB outputs play the buffer chosen.
+  macOS: CoreAudio's default output, a 128-frame buffer.
 - **The delay, key to sound:** shown part by part (Settings; the total in the footer), each figure
   measured or as the driver reports it: MIDI in to output (measured, min/mean/max: a message plays
   from the next buffer rendered, under one period from its arrival), the engine's 2 ms step and
