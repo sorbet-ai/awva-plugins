@@ -17,7 +17,7 @@ same design is what the plugins show in a DAW, drawn natively (`DESIGN.md`).
   engine packages from a folder (below), listed by their labels.
 - **Presets:** the engine's factory presets, and a package's preset files.
 - **The heroes:** the preset's hero parameters (else the engine's) as knobs; every parameter on
-  request; legato.
+  request; mono.
 - **MIDI in:** every input port the OS has (turn one off in Settings).
   - Windows: WinMM. Where Windows MIDI Services runs (Windows 11), ports are multi-client, so another
     app can have the controller open at the same time. Without it a USB port is single-client: a

@@ -22,7 +22,7 @@ struct TimedUmp {
 // instance at the rate, the master level at master_db at once (no fade), the safety chain. The
 // output is delayed by Limiter::kDelay frames (removed here: out[0] is frame 0's sample).
 // safety false: the samples the Player gives the safety chain (the engine's, as the plugin's)
-bool render_offline(const nsc_component& c, const PresetEntry* preset, bool legato, const std::vector<TimedUmp>& events,
+bool render_offline(const nsc_component& c, const PresetEntry* preset, bool mono, const std::vector<TimedUmp>& events,
     uint64_t frames, int rate, float master_db, std::vector<float>* l, std::vector<float>* r, bool safety = true);
 
 // the MPE stream a typical expressive MPE controller sends over USB MIDI: an MPE Configuration

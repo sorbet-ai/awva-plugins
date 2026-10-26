@@ -63,14 +63,14 @@ class Sound {
         preset = j['preset'] as int,
         heroes = (j['heroes'] as List).cast<int>(),
         params = [for (final p in j['params'] as List) ParamInfo(p as Map<String, dynamic>)],
-        legato = j['legato'] as bool;
+        mono = j['mono'] as bool;
   final String engineKey, engineTitle, engineLabel, engineSummary;
   final bool engineBuiltin;
   final List<PresetInfo> presets;
   final int preset;
   final List<int> heroes;
   final List<ParamInfo> params;
-  final bool legato;
+  final bool mono;
 
   String get presetName => preset >= 0 && preset < presets.length ? presets[preset].name : 'Custom';
 }
@@ -174,7 +174,7 @@ abstract class AwvaBackend {
   Sound? sound();
   bool selectPreset(int index);
   void setParam(int index, double value);
-  void setLegato(bool on);
+  void setMono(bool on);
   void panic();
   void setMasterDb(double db);
   Status status();
@@ -221,7 +221,7 @@ class FfiBackend implements AwvaBackend {
         _selectEngine = _lib.lookupFunction<Int32 Function(Pointer<Utf8>), int Function(Pointer<Utf8>)>('awva_select_engine'),
         _selectPreset = _lib.lookupFunction<Int32 Function(Int32), int Function(int)>('awva_select_preset'),
         _setParam = _lib.lookupFunction<Int32 Function(Int32, Float), int Function(int, double)>('awva_set_param'),
-        _setLegato = _lib.lookupFunction<Void Function(Int32), void Function(int)>('awva_set_legato'),
+        _setMono = _lib.lookupFunction<Void Function(Int32), void Function(int)>('awva_set_mono'),
         _panic = _lib.lookupFunction<Void Function(), void Function()>('awva_panic'),
         _setMaster = _lib.lookupFunction<Void Function(Float), void Function(double)>('awva_set_master_db'),
         _status = _lib.lookupFunction<Void Function(Pointer<_Status>), void Function(Pointer<_Status>)>('awva_status_get'),
@@ -263,7 +263,7 @@ class FfiBackend implements AwvaBackend {
   final int Function(Pointer<Utf8>) _selectEngine;
   final int Function(int) _selectPreset;
   final int Function(int, double) _setParam;
-  final void Function(int) _setLegato;
+  final void Function(int) _setMono;
   final void Function() _panic, _midiRefresh, _stop;
   final void Function(double) _setMaster;
   final void Function(Pointer<_Status>) _status;
@@ -308,7 +308,7 @@ class FfiBackend implements AwvaBackend {
   @override
   void setParam(int index, double value) => _setParam(index, value);
   @override
-  void setLegato(bool on) => _setLegato(on ? 1 : 0);
+  void setMono(bool on) => _setMono(on ? 1 : 0);
   @override
   void panic() => _panic();
   @override
