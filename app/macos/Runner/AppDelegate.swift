@@ -5,16 +5,8 @@ import FlutterMacOS
 
 @main
 class AppDelegate: FlutterAppDelegate {
-  // (FlutterAppDelegate declares applicationDidFinishLaunching but doesn't implement it: an
-  // override, without a super call, which would be an unrecognized selector)
-  override func applicationDidFinishLaunching(_ notification: Notification) {
-    // --hidden: no window, no Dock icon (smoke runs on someone's machine)
-    if CommandLine.arguments.contains("--hidden") {
-      NSApp.setActivationPolicy(.prohibited)
-      mainFlutterWindow?.orderOut(nil)
-    }
-  }
-
+  // (--hidden is MainFlutterWindow's: its window stays on screen, unseen, so this quits only when
+  // a window is really closed)
   override func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
     return true
   }

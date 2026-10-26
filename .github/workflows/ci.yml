@@ -101,7 +101,7 @@ jobs:
               case "$archs" in *arm64*x86_64*|*x86_64*arm64*) ;; *) echo "not universal: $b"; exit 1 ;; esac
             done
           fi
-          run() { "$exe" --no-audio --no-midi "$@" --exit-after 3 --probe-wav "$RUNNER_TEMP/probe.wav" --engines-dir "$RUNNER_TEMP/none"; }
+          run() { "$exe" --no-audio --no-midi "$@" --exit-after 3 --probe-wav "$RUNNER_TEMP/probe.wav" --engines-dir "$RUNNER_TEMP/none" | tee "$RUNNER_TEMP/smoke.txt"; }
           if ! run --hidden; then
             if [ "$RUNNER_OS" = macOS ]; then # (where it stopped, for the log)
               lldb --batch -o run -k "thread backtrace all" -k quit -- "$exe" --no-audio --no-midi --hidden --exit-after 3 \
@@ -111,6 +111,8 @@ jobs:
             exit 1
           fi
           test -s "$RUNNER_TEMP/probe.wav"
+          # the line it prints at --exit-after: it ran the whole time, and no engine faulted
+          grep -q ', 0 faults,' "$RUNNER_TEMP/smoke.txt" || { echo "no '0 faults' status line: it quit early, or an engine faulted"; exit 1; }
       - name: app archive
         id: app_package
         working-directory: app
@@ -251,8 +253,10 @@ jobs:
         working-directory: app
         run: |
           xvfb-run -a build/linux/x64/release/bundle/awva --no-audio --no-midi --hidden --exit-after 3 \
-            --probe-wav "$RUNNER_TEMP/probe.wav" --engines-dir "$RUNNER_TEMP/none"
+            --probe-wav "$RUNNER_TEMP/probe.wav" --engines-dir "$RUNNER_TEMP/none" | tee "$RUNNER_TEMP/smoke.txt"
           test -s "$RUNNER_TEMP/probe.wav"
+          # the line it prints at --exit-after: it ran the whole time, and no engine faulted
+          grep -q ', 0 faults,' "$RUNNER_TEMP/smoke.txt" || { echo "no '0 faults' status line: it quit early, or an engine faulted"; exit 1; }
       - name: app archive
         id: app_package
         working-directory: app
