@@ -2,11 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "catalog.h"
 
+#include <algorithm>
 #include <cstdio>
+#include <cstring>
 
 #include "instance.h"
 #include "json.h"
 #include "nsc/load.h"
+#include "nsc/package.h"
 #include "platform.h"
 
 namespace awva_app {
@@ -49,24 +52,18 @@ const nsc_component* Catalog::load(const std::string& path, std::string* error) 
 	return lib.c;
 }
 
-// a package's presets/*.preset.json, each checked by the component's own load_preset()
-void Catalog::add_presets(Engine& e, const std::string& dir) {
-	const std::string pdir = join(dir, "presets");
+// a package's presets (its kind-3 sections, in tag order), each checked by the component's own
+// load_preset(); another engine's preset is listed as refused
+void Catalog::add_presets(Engine& e, const std::vector<std::pair<std::string, std::string>>& files) {
 	std::unique_ptr<Instance> scratch;
-	for (const std::string& f : list_dir(pdir, false)) {
-		if (!ends_with(f, ".preset.json")) continue;
-		std::string text;
-		if (!read_file(join(pdir, f), &text, 1u << 20)) {
-			e.refused.push_back(f + ": can't be read");
-			continue;
-		}
+	for (const auto& [tag, text] : files) {
 		if (!scratch) {
 			scratch = std::make_unique<Instance>(*e.c);
 			if (scratch->init(48000) != 0) return;
 		}
 		nsc_preset_report rep{};
 		if (e.c->load_preset(scratch->state, text.data(), static_cast<uint32_t>(text.size()), &rep) != 1) {
-			e.refused.push_back(f + ": " + (rep.error ? rep.error : "refused"));
+			e.refused.push_back(tag + ": " + (rep.error ? rep.error : "refused"));
 			continue;
 		}
 		PresetEntry p;
@@ -77,9 +74,125 @@ void Catalog::add_presets(Engine& e, const std::string& dir) {
 				for (const Json& v : h->a)
 					if (v.type == Json::String) p.heroes.push_back(v.s);
 		}
-		if (p.name.empty()) p.name = f.substr(0, f.size() - std::string(".preset.json").size());
-		p.text = std::move(text);
+		if (p.name.empty()) p.name = tag;
+		p.text = text;
 		e.presets.push_back(std::move(p));
+	}
+}
+
+// the image tag of this computer (awva-package/2)
+const char* host_tag() {
+#if defined(_WIN32)
+	return "x86_64-windows";
+#elif defined(__APPLE__) && defined(__aarch64__)
+	return "arm64-macos";
+#elif defined(__APPLE__)
+	return "x86_64-macos";
+#else
+	return "x86_64-linux";
+#endif
+}
+
+// one .awvapkg (app/README.md): its container checked (nsc/package.h), its manifest,
+// this computer's image copied out and loaded, its presets; e.error says why when refused
+void Catalog::add_package(Engine& e, const std::string& path, const std::vector<Engine>& builtins) {
+	std::string bytes;
+	if (!read_file(path, &bytes, 256u << 20)) {
+		e.error = "can't be read";
+		return;
+	}
+	const auto* p = reinterpret_cast<const uint8_t*>(bytes.data());
+	nscpkg::Reason why;
+	if (!nscpkg::check_package(p, bytes.size(), static_cast<uint32_t>(bytes.size()), why)) {
+		e.error = why.text;
+		return;
+	}
+	nscpkg::PackageHeader h;
+	std::memcpy(&h, p, sizeof h);
+	if (h.abi != NSC_ABI) {
+		e.error = "an awva component of ABI " + std::to_string(h.abi) + " (this app takes ABI " + std::to_string(NSC_ABI) + ")";
+		return;
+	}
+	// every section's crc
+	std::vector<nscpkg::Section> secs(h.n_sections);
+	for (uint32_t i = 0; i < h.n_sections; i++) {
+		std::memcpy(&secs[i], p + sizeof h + i * sizeof(nscpkg::Section), sizeof(nscpkg::Section));
+		if (nscpkg::crc32(0, p + secs[i].offset, secs[i].size) != secs[i].crc) {
+			e.error = std::string("section ") + secs[i].tag + ": crc";
+			return;
+		}
+	}
+	// the manifest
+	Json m;
+	nscpkg::Section ms;
+	if (nscpkg::find_section(p, nscpkg::KIND_MANIFEST, nullptr, &ms) < 0 ||
+	    !Json::parse(std::string(bytes.data() + ms.offset, ms.size), &m) || m.type != Json::Object) {
+		e.error = "no manifest";
+		return;
+	}
+	if (m.str("format") != "awva-package/2") {
+		e.error = "manifest format \"" + m.str("format") + "\" (this app reads awva-package/2)";
+		return;
+	}
+	e.label = m.str("label", e.label);
+	const std::string id = m.str("id");
+	const std::string base = m.str("awva");
+	const std::string pin = AWVA_APP_AWVA_COMMIT; // (the pinned awva commit, all 40 digits)
+	bool any_image = false;
+	if (const Json* im = m.get("images"); im && im->type == Json::Array) any_image = !im->a.empty();
+	std::vector<std::pair<std::string, std::string>> presets;
+	for (const nscpkg::Section& s : secs)
+		if (s.kind == nscpkg::KIND_PRESET) presets.push_back({s.tag, std::string(bytes.data() + s.offset, s.size)});
+	std::sort(presets.begin(), presets.end());
+	if (!any_image) { // presets for a built-in engine
+		for (const Engine& b : builtins)
+			if (b.ok && id == b.c->desc->id) e.c = b.c;
+		if (!e.c) {
+			e.error = "presets for \"" + id + "\", which isn't a built-in engine";
+			return;
+		}
+	} else {
+		if (base.size() < 7 || base.size() > pin.size() || pin.compare(0, base.size(), base) != 0) {
+			e.error = "built for a different awva (" + (base.empty() ? std::string("no \"awva\" commit") : base) + "; this app needs " + pin.substr(0, 7) + ")";
+			return;
+		}
+		nscpkg::Section is;
+		if (nscpkg::find_section(p, nscpkg::KIND_IMAGE, host_tag(), &is) < 0) {
+			e.error = std::string("no image for this computer (") + host_tag() + ")";
+			return;
+		}
+		nscpkg::ModuleHeader mh;
+		if (is.size < sizeof mh) {
+			e.error = "image: short";
+			return;
+		}
+		std::memcpy(&mh, p + is.offset, sizeof mh);
+		if (mh.magic != nscpkg::MODULE_MAGIC || nscpkg::crc32(0, &mh, 252) != mh.header_crc || mh.reloc_count != 0 ||
+		    sizeof mh + mh.image_size > is.size || !nscpkg::field_is(mh.arch, host_tag()) || mh.abi != NSC_ABI ||
+		    nscpkg::crc32(0, p + is.offset + sizeof mh, is.size - sizeof mh) != mh.payload_crc) {
+			e.error = std::string("image for ") + host_tag() + ": damaged or another ABI";
+			return;
+		}
+		// copied out (a package can be written again while its engine plays) and loaded
+		const std::string copy = join(cache_dir(), e.source + "-" + std::to_string(now_ns()) + "-" + std::to_string(copies_++) + library_suffix());
+		if (!write_file(copy, std::string(bytes.data() + is.offset + sizeof mh, mh.image_size))) {
+			e.error = "the image can't be copied out";
+			return;
+		}
+		e.c = load(copy, &e.error);
+		if (!e.c) return;
+		if (id != e.c->desc->id) {
+			e.error = "the image is " + std::string(e.c->desc->id) + ", the manifest says " + id;
+			e.c = nullptr;
+			return;
+		}
+		for (int i = 0; i < e.c->desc->num_presets; i++) e.presets.push_back({e.c->desc->presets[i].name, i, "", {}});
+	}
+	e.ok = true;
+	add_presets(e, presets);
+	if (e.presets.empty() && !any_image) {
+		e.ok = false;
+		e.error = "a presets-only package without a preset that loads";
 	}
 }
 
@@ -100,57 +213,14 @@ void Catalog::scan(const std::string& builtin_dir, const std::string& user_dir) 
 			for (int i = 0; i < e.c->desc->num_presets; i++) e.presets.push_back({e.c->desc->presets[i].name, i, "", {}});
 		out.push_back(std::move(e));
 	}
-	// the packages
-	for (const std::string& folder : list_dir(user_dir, true)) {
-		if (folder.empty() || folder[0] == '.') continue; // (a package being written: it appears when renamed)
-		const std::string dir = join(user_dir, folder);
+	// the packages: <name>.awvapkg files (a ".tmp" being written is not one yet)
+	for (const std::string& f : list_dir(user_dir, false)) {
+		if (f.empty() || f[0] == '.' || !ends_with(f, ".awvapkg")) continue;
 		Engine e;
-		e.key = "package:" + folder;
-		e.label = folder;
-		e.source = folder;
-		std::string text;
-		Json m;
-		if (!read_file(join(dir, "awva-package.json"), &text, 1u << 16)) {
-			e.error = "no awva-package.json";
-		} else if (!Json::parse(text, &m) || m.type != Json::Object) {
-			e.error = "awva-package.json isn't JSON";
-		} else if (m.str("format") != "awva-package/1") {
-			e.error = "awva-package.json: \"format\" isn't \"awva-package/1\"";
-		} else {
-			e.label = m.str("label", folder);
-			const std::string lib = m.str("library"), engine = m.str("engine");
-			if (!lib.empty() == !engine.empty()) {
-				e.error = "awva-package.json names neither or both of \"library\" and \"engine\"";
-			} else if (!lib.empty()) {
-				const std::string base = m.str("awva");
-				const std::string pin = AWVA_APP_AWVA_COMMIT; // (the pinned awva commit, all 40 digits)
-				if (base.size() < 7 || base.size() > pin.size() || pin.compare(0, base.size(), base) != 0) {
-					// (da3ad97 changed nsc_voice / nsc_globals under the same NSC_ABI: never load another base's library)
-					e.error = "built for a different awva (" + (base.empty() ? std::string("no \"awva\" commit") : base) + "; this app needs " + pin.substr(0, 7) + ")";
-				} else if (!ends_with(lib, library_suffix())) {
-					e.error = "\"library\" " + lib + " isn't a " + library_suffix() + " (a package is per system)";
-				} else {
-					// a copy, so the package can be rebuilt while it plays
-					const std::string copy = join(cache_dir(), folder + "-" + std::to_string(now_ns()) + "-" + std::to_string(copies_++) + library_suffix());
-					if (!copy_file(join(dir, lib), copy)) e.error = "\"library\" " + lib + " isn't in the package";
-					else e.c = load(copy, &e.error);
-					if (e.c)
-						for (int i = 0; i < e.c->desc->num_presets; i++) e.presets.push_back({e.c->desc->presets[i].name, i, "", {}});
-				}
-			} else {
-				for (const Engine& b : out)
-					if (b.ok && engine == b.c->desc->id) e.c = b.c;
-				if (!e.c) e.error = "\"engine\" " + engine + " isn't a built-in engine";
-			}
-			if (e.c) {
-				e.ok = true;
-				add_presets(e, dir);
-				if (e.presets.empty() && !engine.empty()) {
-					e.ok = false;
-					e.error = "a presets-only package without a preset that loads";
-				}
-			}
-		}
+		e.source = f.substr(0, f.size() - 8);
+		e.key = "package:" + e.source;
+		e.label = e.source;
+		add_package(e, join(user_dir, f), out);
 		out.push_back(std::move(e));
 	}
 	engines_ = std::move(out);
@@ -158,10 +228,7 @@ void Catalog::scan(const std::string& builtin_dir, const std::string& user_dir) 
 
 std::string Catalog::signature(const std::string& user_dir) {
 	std::string s;
-	for (const std::string& folder : list_dir(user_dir, true)) {
-		if (folder.empty() || folder[0] == '.') continue;
-		s += folder + "{" + file_stamp(join(user_dir, folder)) + "}";
-	}
+	s = file_stamp(user_dir); // (the .awvapkg files: names, sizes, times)
 	return s;
 }
 

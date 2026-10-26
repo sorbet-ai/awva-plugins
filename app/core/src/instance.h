@@ -88,7 +88,7 @@ struct Instance {
 		if (c.init(state, fast, large, rate, nv) != 0) return -1;
 		sr = rate;
 		if (preset >= 0 && preset < d.num_presets) c.set_preset(state, preset);
-		if (mono) (void)c.mode(state, NSC_MODE_LEGATO, 1);
+		if (mono) (void)c.mode(state, NSC_MODE_MONO, 1);
 		for (int i = 0; i < d.num_params; i++) (void)c.set_param(state, i, values[static_cast<size_t>(i)]);
 		clear();
 		return 0;
@@ -141,7 +141,7 @@ struct Instance {
 	}
 	void set_mono(bool on) {
 		mono = on;
-		(void)c.mode(state, NSC_MODE_LEGATO, on ? 1 : 0);
+		(void)c.mode(state, NSC_MODE_MONO, on ? 1 : 0);
 	}
 	int param_index(const char* name) const {
 		for (int i = 0; i < d.num_params; i++)

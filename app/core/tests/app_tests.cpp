@@ -6,8 +6,9 @@
 //   - the safety chain: below the ceiling the samples pass bit for bit (delayed); a signal 18 dB
 //     over it comes out under -1 dBTP (its 4x-interpolated peaks); a NaN block is muted and counted;
 //     the master level starts faded in
-//   - packages (awva-package/1): a library package, a presets-only package, and broken ones, each
-//     listed as the README says
+//   - packages (.awvapkg, awva-package/2): an image package, a presets-only package, and broken
+//     ones (another awva, another computer, no such engine, a damaged section, the old format),
+//     each listed as the README says
 //   - the controller's MPE setup reaches a new engine: an MCM and a bend range sent before an engine
 //     switch give the same output as sent to that engine directly
 //   - MIDI 1.0 bytes to UMP
@@ -31,6 +32,7 @@
 #include "platform.h"
 #include "player.h"
 #include "nsc/load.h"
+#include "nsc/package.h"
 #include "endpoint_gain.h"
 #include "safety.h"
 
@@ -125,21 +127,79 @@ void safety_checks() {
 	}
 }
 
-std::string mkpkg(const std::string& root, const std::string& name, const std::string& manifest) {
-	const std::string d = join(root, name);
-	make_dirs(join(d, "presets"));
-	write_file(join(d, "awva-package.json"), manifest);
-	return d;
+// an .awvapkg (awva-package/2), written here as awva's packager writes one (nsc/package.h): the
+// manifest, an image for each (tag, library) given, the presets (tag, text)
+struct Image {
+	std::string tag, path;
+};
+bool write_awvapkg(const std::string& out, const std::string& manifest, const std::vector<Image>& images,
+    const std::vector<std::pair<std::string, std::string>>& presets) {
+	struct Sec {
+		uint32_t kind;
+		std::string tag, bytes;
+	};
+	std::vector<Sec> secs = {{nscpkg::KIND_MANIFEST, "manifest", manifest}};
+	for (const Image& im : images) {
+		std::string lib;
+		nsc_library l;
+		if (!read_file(im.path, &lib, 64u << 20) || !nsc_load_check(im.path, &l)) return false;
+		const nsc_desc& d = *l.c->desc;
+		nscpkg::ModuleHeader h{};
+		h.magic = nscpkg::MODULE_MAGIC;
+		h.format = nscpkg::FORMAT;
+		h.header_size = sizeof h;
+		h.abi = d.abi;
+		std::snprintf(h.arch, sizeof h.arch, "%s", im.tag.c_str());
+		std::snprintf(h.toolchain, sizeof h.toolchain, "app_tests");
+		h.image_size = static_cast<uint32_t>(lib.size());
+		h.state_bytes = d.state_bytes, h.fast_bytes = d.fast_bytes, h.large_bytes = d.large_bytes;
+		h.max_voices = d.max_voices, h.channels = d.channels, h.led = d.led, h.schema_hash = d.schema_hash;
+		std::snprintf(h.id, sizeof h.id, "%s", d.id);
+		std::snprintf(h.uid, sizeof h.uid, "%s", d.uid);
+		std::snprintf(h.version, sizeof h.version, "%s", d.version ? d.version : "");
+		h.payload_crc = nscpkg::crc32(0, lib.data(), lib.size());
+		h.header_crc = nscpkg::crc32(0, &h, 252);
+		secs.push_back({nscpkg::KIND_IMAGE, im.tag, std::string(reinterpret_cast<const char*>(&h), sizeof h) + lib});
+	}
+	for (const auto& [tag, text] : presets) secs.push_back({nscpkg::KIND_PRESET, tag, text});
+	const uint32_t n = static_cast<uint32_t>(secs.size());
+	std::string table(n * sizeof(nscpkg::Section), '\0'), body;
+	uint32_t at = static_cast<uint32_t>(sizeof(nscpkg::PackageHeader) + table.size());
+	for (uint32_t i = 0; i < n; i++) {
+		while ((at + body.size()) % 4) body += '\0';
+		nscpkg::Section s{};
+		s.kind = secs[i].kind;
+		std::snprintf(s.tag, sizeof s.tag, "%s", secs[i].tag.c_str());
+		s.offset = at + static_cast<uint32_t>(body.size());
+		s.size = static_cast<uint32_t>(secs[i].bytes.size());
+		s.crc = nscpkg::crc32(0, secs[i].bytes.data(), secs[i].bytes.size());
+		std::memcpy(&table[i * sizeof s], &s, sizeof s);
+		body += secs[i].bytes;
+	}
+	nscpkg::PackageHeader ph{};
+	ph.magic = nscpkg::PACKAGE_MAGIC;
+	ph.format = nscpkg::FORMAT;
+	ph.header_size = sizeof ph;
+	ph.abi = NSC_ABI;
+	ph.n_sections = n;
+	ph.table_offset = sizeof ph;
+	ph.file_size = at + static_cast<uint32_t>(body.size());
+	ph.table_crc = nscpkg::crc32(0, table.data(), table.size());
+	ph.header_crc = nscpkg::crc32(0, &ph, 60);
+	return write_file(out, std::string(reinterpret_cast<const char*>(&ph), sizeof ph) + table + body);
+}
+
+std::string manifest(const std::string& label, const std::string& id, const std::string& awva, bool image) {
+	return "{\"format\": \"awva-package/2\", \"label\": " + jstr(label) + ", \"id\": " + jstr(id) + ", \"awva\": " + jstr(awva) +
+	    ", \"abi\": " + std::to_string(NSC_ABI) + ", \"images\": [" + (image ? jstr(host_tag()) : std::string()) + "]}";
 }
 
 void package_checks(const std::string& builtin, const std::string& scratch) {
 	const std::string root = join(scratch, "engines");
 	make_dirs(root);
-	// a library package: a copy of the built-in va, with a preset file of its own and a foreign one
 	const std::string lib = join(builtin, std::string("va") + library_suffix());
-	const std::string a = mkpkg(root, "va-test", "{\"format\": \"awva-package/1\", \"label\": \"va test (fit)\", \"library\": \"va" + std::string(library_suffix()) + "\", \"awva\": \"" AWVA_APP_AWVA_COMMIT "\"}");
-	copy_file(lib, join(a, std::string("va") + library_suffix()));
 	// a preset of va, written by the component itself
+	std::string preset;
 	{
 		nsc_library l;
 		if (nsc_load_check(lib, &l)) {
@@ -147,19 +207,27 @@ void package_checks(const std::string& builtin, const std::string& scratch) {
 			in.init(48000);
 			l.c->set_param(in.state, 0, l.c->desc->params[0].min);
 			char buf[16384];
-			const uint32_t len = l.c->save_preset(in.state, "Package Sound", buf, sizeof buf);
-			write_file(join(join(a, "presets"), "01-package-sound.preset.json"), std::string(buf, len));
-			write_file(join(join(a, "presets"), "02-not-va.preset.json"), "{\"format\": \"awva-preset/1\", \"engine\": \"bowed\", \"params\": {}}");
-			// a presets-only package for the built-in va
-			const std::string b = mkpkg(root, "va-fit", "{\"format\": \"awva-package/1\", \"label\": \"va fit v1\", \"engine\": \"va\"}");
-			write_file(join(join(b, "presets"), "01-fit.preset.json"), std::string(buf, len));
+			preset.assign(buf, l.c->save_preset(in.state, "Package Sound", buf, sizeof buf));
 		}
 	}
-	mkpkg(root, "broken-format", "{\"format\": \"awva-package/9\", \"label\": \"x\", \"library\": \"x.dll\"}");
-	mkpkg(root, "broken-base", "{\"format\": \"awva-package/1\", \"label\": \"old base\", \"library\": \"va" + std::string(library_suffix()) + "\", \"awva\": \"1726a05\"}");
-	copy_file(lib, join(join(root, "broken-base"), std::string("va") + library_suffix()));
-	mkpkg(root, "broken-missing", "{\"format\": \"awva-package/1\", \"label\": \"missing lib\", \"library\": \"nothere" + std::string(library_suffix()) + "\", \"awva\": \"" AWVA_APP_AWVA_COMMIT "\"}");
-	mkpkg(root, "broken-engine", "{\"format\": \"awva-package/1\", \"label\": \"no engine\", \"engine\": \"nosuchengine\"}");
+	const std::string pin = AWVA_APP_AWVA_COMMIT;
+	// a library package: the built-in va as a package, its preset and another engine's
+	write_awvapkg(join(root, "va-test.awvapkg"), manifest("va test (fit)", "va", pin.substr(0, 7), true), {{host_tag(), lib}},
+	    {{"01-package-sound", preset}, {"02-not-va", "{\"format\": \"awva-preset/1\", \"engine\": \"bowed\", \"params\": {}}"}});
+	// a presets-only package for the built-in va
+	write_awvapkg(join(root, "va-fit.awvapkg"), manifest("va fit v1", "va", "", false), {}, {{"01-fit", preset}});
+	// refused ones
+	write_awvapkg(join(root, "broken-base.awvapkg"), manifest("old base", "va", "1726a05", true), {{host_tag(), lib}}, {});
+	write_awvapkg(join(root, "broken-target.awvapkg"), manifest("another computer", "va", pin, true), {{"armv7em-fpv5-d16-softfp", lib}}, {});
+	write_awvapkg(join(root, "broken-engine.awvapkg"), manifest("no engine", "nosuchengine", "", false), {}, {{"01-fit", preset}});
+	{
+		std::string b;
+		write_awvapkg(join(root, "broken-crc.awvapkg"), manifest("damaged", "va", pin, true), {{host_tag(), lib}}, {});
+		read_file(join(root, "broken-crc.awvapkg"), &b, 64u << 20);
+		b[b.size() / 2] ^= 0x5a; // (a byte of the image)
+		write_file(join(root, "broken-crc.awvapkg"), b);
+		write_file(join(root, "broken-format.awvapkg"), "{\"format\": \"awva-package/1\"}");
+	}
 
 	Catalog cat;
 	cat.scan(builtin, root);
@@ -167,18 +235,18 @@ void package_checks(const std::string& builtin, const std::string& scratch) {
 	const Engine* pa = cat.find("package:va-test");
 	const Engine* pb = cat.find("package:va-fit");
 	check(va && va->ok && va->label == "built in", "packages: the built-in va is listed, built in");
-	check(pa && pa->ok && pa->label == "va test (fit)" && pa->c != va->c, "packages: a library package loads from its own copy, under its label");
+	check(pa && pa->ok && pa->label == "va test (fit)" && pa->c != va->c, "packages: an .awvapkg's image for this computer loads from its own copy, under its label");
 	check(pa && pa->presets.size() == static_cast<size_t>(pa->c->desc->num_presets) + 1 && pa->presets.back().name == "Package Sound" &&
 	          pa->refused.size() == 1,
-	    "packages: its factory presets, then its preset file by title; another engine's preset refused");
+	    "packages: its factory presets, then its preset sections by title; another engine's preset refused");
 	check(pb && pb->ok && pb->c == va->c && pb->presets.size() == 1 && pb->label == "va fit v1", "packages: a presets-only package plays the built-in engine with its presets");
 	{
 		const Engine* e = cat.find("package:broken-base");
-		check(e && !e->ok && !e->c && e->error.rfind("built for a different awva", 0) == 0, "packages: a library from another awva base is refused unloaded: " + (e ? e->error : "?"));
+		check(e && !e->ok && !e->c && e->error.rfind("built for a different awva", 0) == 0, "packages: an image built on another awva is refused unloaded: " + (e ? e->error : "?"));
 	}
-	for (const char* k : {"package:broken-format", "package:broken-missing", "package:broken-engine"}) {
+	for (const char* k : {"package:broken-target", "package:broken-engine", "package:broken-crc", "package:broken-format"}) {
 		const Engine* e = cat.find(k);
-		check(e && !e->ok && !e->error.empty(), std::string("packages: ") + k + " is listed, refused: " + (e ? e->error : "?"));
+		check(e && !e->ok && !e->c && !e->error.empty(), std::string("packages: ") + k + " is listed, refused: " + (e ? e->error : "?"));
 	}
 	Json j;
 	check(Json::parse(cat.json(), &j) && j.type == Json::Array && j.a.size() == cat.engines().size(), "packages: the catalog is JSON");
@@ -191,23 +259,23 @@ void package_checks(const std::string& builtin, const std::string& scratch) {
 	check(Json::parse(awva_sound(), &s) && s.num("preset", -1) == 0 && s.get("heroes") && !s.get("heroes")->a.empty(), "the sound: its preset and heroes");
 	check(awva_select_engine("package:broken-engine") != 0 && std::strlen(awva_last_error()) > 0, "a refused package can't be played, and says why");
 
-	// a package written while the core runs: listed at the next refresh, by itself; a hidden folder
-	// (one being written) never
+	// a package written while the core runs: listed at the next refresh, by itself; one being
+	// written (<name>.awvapkg.tmp) never
 	awva_status st0;
 	awva_status_get(&st0);
-	const std::string hidden = mkpkg(root, ".va-iter9", "{\"format\": \"awva-package/1\", \"label\": \"half written\", \"engine\": \"va\"}");
-	write_file(join(join(hidden, "presets"), "01-fit.preset.json"), read_back(join(join(root, "va-fit"), "presets/01-fit.preset.json")));
+	const std::string tmp = join(root, "va-iter9.awvapkg.tmp");
+	write_awvapkg(tmp, manifest("half written", "va", "", false), {}, {{"01-fit", preset}});
 	awva_midi_refresh();
-	check(std::string(awva_catalog()).find("half written") == std::string::npos, "a hidden folder (a package being written) isn't listed");
-	std::rename(hidden.c_str(), join(root, "va-iter9").c_str());
+	check(std::string(awva_catalog()).find("half written") == std::string::npos, "a package being written (.tmp) isn't listed");
+	std::rename(tmp.c_str(), join(root, "va-iter9.awvapkg").c_str());
 	awva_midi_refresh();
 	awva_status st1;
 	awva_status_get(&st1);
 	check(std::string(awva_catalog()).find("package:va-iter9") != std::string::npos && st1.catalog != st0.catalog,
 	    "a package that appears while the core runs is listed at the next refresh, and the UI is told");
-	// the package playing, its folder removed: it keeps playing, the sound still there
+	// the package playing, its file removed: it keeps playing, the sound still there
 	check(awva_select_engine("package:va-iter9") == 0, "the new package plays");
-	remove_all(join(root, "va-iter9"));
+	std::remove(join(root, "va-iter9.awvapkg").c_str());
 	awva_midi_refresh();
 	Json snd;
 	check(Json::parse(awva_sound(), &snd) && snd.get("engine") && snd.get("engine")->str("key") == "package:va-iter9",
@@ -304,6 +372,31 @@ void exclusive_volume_checks(const std::string& builtin, const std::string& scra
 	check(shared > 1e-3 && std::fabs(diff - want) < 0.01, b);
 }
 
+// a burst (1000 MIDI messages in one buffer, as a late wake-up after a dense controller gives): the
+// app spreads it over the engine's steps, so nothing is dropped; every note ends
+void burst_checks(const std::string& builtin, const std::string& scratch) {
+	const std::string o = "{\"no_audio\": true, \"midi\": false, \"settings\": \"\", \"builtin_dir\": " + jstr(builtin) + ", \"engines_dir\": " +
+	    jstr(join(scratch, "none")) + "}";
+	if (awva_start(o.c_str()) != 0 || awva_select_engine("builtin:va") != 0) return check(false, "burst: the core starts");
+	std::vector<uint32_t> w;
+	for (int n = 0; n < 10; n++) w.push_back(0x20910000u | (1u + n) << 16 | static_cast<uint32_t>(50 + n) << 8 | 100u); // (Note On, channels 2..11)
+	for (int k = 0; k < 97; k++)
+		for (int n = 0; n < 10; n++) w.push_back(0x20d10000u | (1u + n) << 16 | static_cast<uint32_t>(40 + k % 60) << 8); // (pressure)
+	for (int n = 0; n < 10; n++) w.push_back(0x20810000u | (1u + n) << 16 | static_cast<uint32_t>(50 + n) << 8 | 64u); // (Note Off)
+	for (auto& x : w) x = (x & 0xfff0ffffu) | (x & 0x000f0000u); // (channel in the status nibble)
+	awva_ump(w.data(), static_cast<int32_t>(w.size()));
+	std::this_thread::sleep_for(std::chrono::milliseconds(300));
+	awva_status a;
+	awva_status_get(&a);
+	std::this_thread::sleep_for(std::chrono::milliseconds(3000)); // (the release tails)
+	awva_status b;
+	awva_status_get(&b);
+	awva_stop();
+	char s[160];
+	std::snprintf(s, sizeof s, "burst: %zu messages in one buffer, spread over the steps: every Note Off taken (voices %d, then %d)", w.size(), a.voices, b.voices);
+	check(b.voices == 0, s);
+}
+
 void midi1_checks() {
 	const uint8_t b[] = {0x91, 60, 100, 0xd1, 50, 0xf8, 0xe1, 0x00, 0x40, 0xf0, 1, 2, 3, 0xf7, 0xb1, 74, 64};
 	const std::vector<uint32_t> w = midi1_to_ump(b, sizeof b);
@@ -324,6 +417,7 @@ int main(int argc, char** argv) {
 	package_checks(argv[1], argv[2]);
 	setup_checks(argv[1]);
 	exclusive_volume_checks(argv[1], argv[2]);
+	burst_checks(argv[1], argv[2]);
 	std::printf("%s\n", failures ? "app_tests: FAILED" : "app_tests: ok");
 	return failures ? 1 : 0;
 }

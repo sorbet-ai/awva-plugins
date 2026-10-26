@@ -622,7 +622,7 @@ class _Settings extends StatelessWidget {
           head('your engines'),
           Text(k.enginesDir, style: AwvaType.small(c.text2)),
           const SizedBox(height: AwvaSize.s1),
-          Text('A folder per engine package (awva-package/1); see the README.', style: AwvaType.small(c.text3)),
+          Text('Engine packages (.awvapkg files) here are listed by themselves; see the README.', style: AwvaType.small(c.text3)),
           const SizedBox(height: AwvaSize.s2),
           AwvaButton(onTap: k.rescan, icon: Icons.refresh, label: 'Rescan'),
           for (final e in packages)
