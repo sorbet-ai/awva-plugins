@@ -60,7 +60,7 @@ jobs:
         run: tools/validate.sh
       - name: validator logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: validate-${{ matrix.platform }}
           path: build/validate/
@@ -116,7 +116,7 @@ jobs:
           for b in "$d"/CLAP/*.clap "$d"/VST3/*.vst3 "$d"/AU/*.component; do xcrun stapler staple "$b"; done
           rm -f "${{ steps.package.outputs.zip }}"
           (cd dist && ditto -c -k --keepParent "$(basename "$d")" "$(basename "$d").zip")
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: package-${{ matrix.platform }}
           path: ${{ steps.package.outputs.zip }}
@@ -133,7 +133,7 @@ jobs:
         run: |
           v="$(sed -n 's/^project(awva_plugins VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)"
           [ "${GITHUB_REF_NAME}" = "v$v" ] || { echo "tag ${GITHUB_REF_NAME} but CMakeLists.txt says $v"; exit 1; }
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           pattern: package-*
           path: dist
