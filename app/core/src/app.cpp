@@ -13,854 +13,156 @@
 // allows (under one period from its arrival); the engine takes it at its next 2 ms step. A burst (more
 // than StepSpread::kPerStep in a step: a late wake-up, a dense controller) goes on over the next
 // steps, in order, so no step gets more than the engine's tables take (the board's sizes: 256 a
-// step), however the buffers split it (step_spread.h).
-#include <algorithm>
-#include <atomic>
-#include <chrono>
-#include <cmath>
+// step), however the buffers split it (step_spread.h).#include <algorithm>
 #include <cstring>
-#include <map>
 #include <memory>
-#include <mutex>
 #include <set>
 #include <string>
 #include <thread>
-#include <vector>
 
-#include "audio.h"
-#include "awva_app/awva_app.h"
-#include "catalog.h"
-#include "core.h"
-#include "json.h"
-#include "midi.h"
-#include "platform.h"
-#include "player.h"
-#include "step_spread.h"
-#include "wav.h"
+#include "app_core.h"
 
 namespace awva_app {
 
-namespace {
-
-struct Cmd {
-	enum T : int { SetParam, SetPreset, LoadText, Mono, Panic, Swap, Master } t;
-	int i = 0;
-	float v = 0;
-	void* p = nullptr;
-};
-struct Ret {
-	enum T : int { Inst, Text } t;
-	void* p;
-};
-struct MidiEv {
-	uint64_t ns;
-	uint32_t w[4];
-};
-struct Frame {
-	float l, r;
-};
-
-void atomic_max(std::atomic<float>& a, float v) {
-	float cur = a.load(std::memory_order_relaxed);
-	while (v > cur && !a.compare_exchange_weak(cur, v, std::memory_order_relaxed)) {
+int Core::start(const Json& o) {
+	settings_path_ = o.has("settings") ? o.str("settings") : join(app_data_dir(), "settings.json");
+	load_settings();
+	builtin_dir_ = o.str("builtin_dir");
+	if (builtin_dir_.empty()) {
+		builtin_dir_ = join(core_dir(), "engines");
+		if (list_dir(builtin_dir_, false).empty()) builtin_dir_ = join(join(core_dir(), ".."), "Resources/engines");
 	}
-}
-void atomic_min(std::atomic<float>& a, float v) {
-	float cur = a.load(std::memory_order_relaxed);
-	while (v < cur && !a.compare_exchange_weak(cur, v, std::memory_order_relaxed)) {
+	user_dir_ = o.str("engines_dir", join(app_data_dir(), "engines"));
+	make_dirs(user_dir_);
+	catalog_.scan(builtin_dir_, user_dir_);
+	folder_ = Catalog::signature(user_dir_);
+
+	no_audio_ = o.flag("no_audio", false);
+	audio_ = no_audio_ ? make_null_audio(48000) : make_device_audio();
+	AudioConfig cfg;
+	cfg.device = setting("output_device"); // ("" the system's default)
+	cfg.exclusive = setting("audio_mode") == "exclusive";
+	cfg.frames = 256; // (exclusive: 256 frames, about 5 ms, unless chosen; 0 is the device's smallest)
+	if (!setting("exclusive_buffer").empty()) cfg.frames = std::max(0, std::atoi(setting("exclusive_buffer").c_str()));
+	if (o.has("simulate_volume_db")) cfg.simulate_db = static_cast<float>(o.num("simulate_volume_db", 0));
+	if (no_audio_) { // (the null sink as a fake endpoint, tests: buffer_policy.h)
+		cfg.simulate_bus = o.str("simulate_bus", "");
+		cfg.simulate_wake_ms = o.num("simulate_wake_ms", 0);
+		if (const Json* d = o.get("simulate_devices"))
+			for (const Json& x : d->a) cfg.simulate_devices.push_back({x.str("id"), x.str("name"), x.str("bus", "other"), false});
 	}
-}
+	// what earlier streams learned per endpoint: the exclusive buffer it sustains, or shared only
+	for (const auto& [k, v] : settings_)
+		if (k.rfind(kLearned, 0) == 0 && !v.empty()) cfg.learned[k.substr(std::strlen(kLearned))] = v == "shared" ? -1 : std::atoi(v.c_str());
+	if (no_audio_ && o.has("null_period")) cfg.frames = static_cast<int>(o.num("null_period", 256)); // (the null sink's period, tests)
+	audio_->configure(cfg);
+	config_ = cfg;
+	rate_ = audio_->probe_rate();
+	if (rate_ <= 0) rate_ = 48000;
+	player_.prepare(rate_);
+	float db = kStartDefaultDb;
+	if (!setting("master_db").empty()) db = std::min(static_cast<float>(std::atof(setting("master_db").c_str())), kStartMaxDb);
+	player_.safety.set_target_db(db);
+	player_.safety.fade_in(0.300f);
+	master_db_ = db;
 
-class Core : public AudioCallback {
-public:
-	// --- the UI thread ---------------------------------------------------------------------------
-	int start(const Json& o) {
-		settings_path_ = o.has("settings") ? o.str("settings") : join(app_data_dir(), "settings.json");
-		load_settings();
-		builtin_dir_ = o.str("builtin_dir");
-		if (builtin_dir_.empty()) {
-			builtin_dir_ = join(core_dir(), "engines");
-			if (list_dir(builtin_dir_, false).empty()) builtin_dir_ = join(join(core_dir(), ".."), "Resources/engines");
-		}
-		user_dir_ = o.str("engines_dir", join(app_data_dir(), "engines"));
-		make_dirs(user_dir_);
-		catalog_.scan(builtin_dir_, user_dir_);
-		folder_ = Catalog::signature(user_dir_);
-
-		no_audio_ = o.flag("no_audio", false);
-		audio_ = no_audio_ ? make_null_audio(48000) : make_device_audio();
-		AudioConfig cfg;
-		cfg.device = setting("output_device"); // ("" the system's default)
-		cfg.exclusive = setting("audio_mode") == "exclusive";
-		cfg.frames = 256; // (exclusive: 256 frames, about 5 ms, unless chosen; 0 is the device's smallest)
-		if (!setting("exclusive_buffer").empty()) cfg.frames = std::max(0, std::atoi(setting("exclusive_buffer").c_str()));
-		if (o.has("simulate_volume_db")) cfg.simulate_db = static_cast<float>(o.num("simulate_volume_db", 0));
-		if (no_audio_) { // (the null sink as a fake endpoint, tests: buffer_policy.h)
-			cfg.simulate_bus = o.str("simulate_bus", "");
-			cfg.simulate_wake_ms = o.num("simulate_wake_ms", 0);
-			if (const Json* d = o.get("simulate_devices"))
-				for (const Json& x : d->a) cfg.simulate_devices.push_back({x.str("id"), x.str("name"), x.str("bus", "other"), false});
-		}
-		// what earlier streams learned per endpoint: the exclusive buffer it sustains, or shared only
-		for (const auto& [k, v] : settings_)
-			if (k.rfind(kLearned, 0) == 0 && !v.empty()) cfg.learned[k.substr(std::strlen(kLearned))] = v == "shared" ? -1 : std::atoi(v.c_str());
-		if (no_audio_ && o.has("null_period")) cfg.frames = static_cast<int>(o.num("null_period", 256)); // (the null sink's period, tests)
-		audio_->configure(cfg);
-		config_ = cfg;
-		rate_ = audio_->probe_rate();
-		if (rate_ <= 0) rate_ = 48000;
-		player_.prepare(rate_);
-		float db = kStartDefaultDb;
-		if (!setting("master_db").empty()) db = std::min(static_cast<float>(std::atof(setting("master_db").c_str())), kStartMaxDb);
-		player_.safety.set_target_db(db);
-		player_.safety.fade_in(0.300f);
-		master_db_ = db;
-
-		// the sound: the last engine and preset, else the first engine
-		std::string key = setting("engine");
-		const Engine* e = catalog_.find(key);
-		if (!e || !e->ok) {
-			e = nullptr;
-			for (const Engine& x : catalog_.engines())
-				if (x.ok && !e) e = &x;
-		}
-		if (e) {
-			select_engine(e->key);
-			const int p = std::atoi(setting("preset").c_str());
-			if (!setting("preset").empty() && setting("engine") == e->key && p >= 0 && p < static_cast<int>(e->presets.size())) select_preset(p);
-		}
-
-		const std::string probe = o.str("probe_wav");
-		if (!probe.empty() && wav_.open(probe, rate_)) {
-			probe_run_ = true;
-			probe_th_ = std::thread([this] { probe_loop(); });
-		}
-		start_audio();
-		if (o.flag("midi", true)) {
-			midi_ = make_midi_in();
-			std::set<std::string> off;
-			for (const std::string& n : lines(setting("midi_off"))) off.insert(n);
-			midi_->set_disabled(off);
-			midi_->start([this](int slot, const uint32_t* w, int count, uint64_t ns) {
-				MidiEv e{ns, {0, 0, 0, 0}};
-				std::memcpy(e.w, w, sizeof(uint32_t) * static_cast<size_t>(std::min(count, 4)));
-				(void)rings_[slot].push(e);
-				midi_count_.fetch_add(1, std::memory_order_relaxed);
-			});
-		}
-		return 0;
+	// the sound: the last engine and preset, else the first engine
+	std::string key = setting("engine");
+	const Engine* e = catalog_.find(key);
+	if (!e || !e->ok) {
+		e = nullptr;
+		for (const Engine& x : catalog_.engines())
+			if (x.ok && !e) e = &x;
 	}
-	~Core() override { stop(); }
-	void stop() {
-		if (shut_) return;
-		shut_ = true;
-		if (midi_) midi_->stop();
-		midi_.reset();
-		stop_audio();
-		apply_all();
-		if (probe_run_) {
-			probe_run_ = false;
-			probe_th_.join();
-			drain_probe();
-			wav_.close();
-		}
-		drain_rets();
-		delete player_.inst;
-		player_.inst = nullptr;
+	if (e) {
+		select_engine(e->key);
+		const int p = std::atoi(setting("preset").c_str());
+		if (!setting("preset").empty() && setting("engine") == e->key && p >= 0 && p < static_cast<int>(e->presets.size())) select_preset(p);
 	}
 
-	const Catalog& catalog() const { return catalog_; }
-	const std::string& engines_dir() const { return user_dir_; }
-	int rescan() {
-		if (engine_) playing_ = *engine_; // (the engine playing keeps playing, its package gone or not)
-		catalog_.scan(builtin_dir_, user_dir_);
-		folder_ = Catalog::signature(user_dir_);
-		engine_ = catalog_.find(engine_key_);
-		if (!engine_ && !engine_key_.empty()) engine_ = &playing_;
-		if (engine_ && preset_ >= static_cast<int>(engine_->presets.size())) preset_ = -1;
-		catalog_gen_++;
-		return static_cast<int>(catalog_.engines().size());
+	const std::string probe = o.str("probe_wav");
+	if (!probe.empty() && wav_.open(probe, rate_)) {
+		probe_run_ = true;
+		probe_th_ = std::thread([this] { probe_loop(); });
 	}
-	// the packages folder changed since the last scan: scan it again
-	void rescan_if_changed() {
-		if (Catalog::signature(user_dir_) != folder_) rescan();
-	}
-	uint32_t catalog_generation() const { return catalog_gen_; }
-
-	int select_engine(const std::string& key) {
-		drain_rets();
-		const Engine* e = catalog_.find(key);
-		if (!e || !e->ok) return fail("no such engine, or it was refused: " + key);
-		auto* in = new Instance(*e->c);
-		if (in->init(rate_) != 0) {
-			delete in;
-			return fail("this engine doesn't run at " + std::to_string(rate_) + " Hz");
-		}
-		engine_ = e;
-		engine_key_ = key;
-		preset_ = -1;
-		const int fp = in->c.preset(in->state);
-		for (size_t i = 0; i < e->presets.size(); i++)
-			if (e->presets[i].factory >= 0 && e->presets[i].factory == fp) preset_ = static_cast<int>(i);
-		// a package of preset files only: its first preset (not live yet: set here)
-		if (preset_ < 0 && !e->presets.empty() && e->presets[0].factory < 0) {
-			const std::string& t = e->presets[0].text;
-			(void)in->c.load_preset(in->state, t.data(), static_cast<uint32_t>(t.size()), nullptr);
-			preset_ = 0;
-		}
-		ui_ = in;
-		mono_ = false;
-		send({Cmd::Swap, e->key.rfind("package:", 0) == 0 && e->c != builtin_of(e) ? 1 : 0, 0, in});
-		set_setting("engine", key);
-		set_setting("preset", std::to_string(preset_));
-		return 0;
-	}
-	int select_preset(int i) {
-		if (!engine_ || !ui_ || i < 0 || i >= static_cast<int>(engine_->presets.size())) return fail("no such preset");
-		const PresetEntry& p = engine_->presets[static_cast<size_t>(i)];
-		if (p.factory >= 0) send({Cmd::SetPreset, p.factory, 0, nullptr});
-		else send({Cmd::LoadText, 0, 0, new std::string(p.text)});
-		preset_ = i;
-		set_setting("preset", std::to_string(i));
-		return 0;
-	}
-	int set_param(int i, float v) {
-		if (!ui_ || i < 0 || i >= ui_->d.num_params) return fail("no such parameter");
-		send({Cmd::SetParam, i, v, nullptr});
-		return 0;
-	}
-	float param(int i) const { return ui_ && i >= 0 && i < ui_->d.num_params ? ui_->c.param(ui_->state, i) : 0.0f; }
-	void set_mono(bool on) {
-		mono_ = on;
-		send({Cmd::Mono, on ? 1 : 0, 0, nullptr});
-	}
-	void panic() { send({Cmd::Panic, 0, 0, nullptr}); }
-	void set_master(float db) {
-		db = std::clamp(db, kMasterMinDb, kMasterMaxDb);
-		master_db_ = db;
-		send({Cmd::Master, 0, db, nullptr});
-		set_setting("master_db", jnum(db));
-	}
-
-	std::string sound_json() {
-		drain_rets();
-		if (!engine_ || !ui_) return "{}";
-		const nsc_desc& d = ui_->d;
-		std::string s = "{\"engine\":{\"key\":" + jstr(engine_->key) + ",\"label\":" + jstr(engine_->label) + ",\"id\":" + jstr(d.id) +
-		    ",\"title\":" + jstr(d.name) + ",\"version\":" + jstr(d.version ? d.version : "") + ",\"summary\":" + jstr(d.summary ? d.summary : "") +
-		    ",\"builtin\":" + (engine_->key.rfind("builtin:", 0) == 0 ? "true" : "false") + "}";
-		s += ",\"presets\":[";
-		for (size_t i = 0; i < engine_->presets.size(); i++)
-			s += std::string(i ? "," : "") + "{\"name\":" + jstr(engine_->presets[i].name) + ",\"factory\":" + (engine_->presets[i].factory >= 0 ? "true" : "false") + "}";
-		s += "],\"preset\":" + std::to_string(preset_) + ",\"heroes\":[";
-		bool first = true;
-		for (const std::string& h : heroes()) {
-			const int k = ui_->param_index(h.c_str());
-			if (k < 0) continue;
-			s += (first ? "" : ",") + std::to_string(k);
-			first = false;
-		}
-		s += "],\"params\":[";
-		for (int i = 0; i < d.num_params; i++) {
-			const nsc_param& p = d.params[i];
-			s += std::string(i ? "," : "") + "{\"name\":" + jstr(p.name) + ",\"group\":" + jstr(p.group ? p.group : "") + ",\"min\":" + jnum(p.min) +
-			    ",\"max\":" + jnum(p.max) + ",\"kind\":" + std::to_string(p.kind) + ",\"def\":" + jnum(p.def) + ",\"value\":" + jnum(param(i)) +
-			    ",\"label\":" + jstr(p.label ? p.label : "") + ",\"hover\":" + jstr(p.hover ? p.hover : "") + ",\"icon\":" + jstr(p.icon ? p.icon : "") + "}";
-		}
-		s += "],\"mono\":" + std::string(mono_ ? "true" : "false") + "}";
-		return s;
-	}
-
-	void status(awva_status* o) {
-		o->peak_l = peak_l_.exchange(0.0f);
-		o->peak_r = peak_r_.exchange(0.0f);
-		const float g = min_gain_.exchange(1.0f);
-		o->reduction_db = g < 1.0f ? -20.0f * std::log10(std::max(g, 1e-6f)) : 0.0f;
-		o->master_db = master_db_;
-		o->cpu = cpu_.load();
-		o->voices = voices_.load();
-		const AudioInfo i = audio_info();
-		o->audio_state = i.state;
-		o->sample_rate = i.rate;
-		o->buffer_frames = i.buffer;
-		o->midi_events = midi_count_.load();
-		o->generation = generation_.load();
-		o->xruns = xruns_.load();
-		o->faults = faults_.load();
-		o->engine_stopped = stopped_.load();
-		o->catalog = catalog_gen_;
-	}
-
-	std::string midi_json() {
-		std::string s = "[";
-		if (midi_)
-			for (const MidiPort& p : midi_->ports()) {
-				if (s.size() > 1) s += ",";
-				s += "{\"name\":" + jstr(p.name) + ",\"enabled\":" + (p.enabled ? "true" : "false") + ",\"state\":" + jstr(p.state) +
-				    ",\"message\":" + jstr(p.message) + "}";
-			}
-		return s + "]";
-	}
-	void midi_refresh() {
-		drain_rets();
-		if (midi_) midi_->refresh();
-		rescan_if_changed(); // (a package written while the app runs is listed within two seconds)
-		if (!audio_) return;
-		// the system's default output changed: play on the new one, if it's the one playing (faded in,
-		// at -12 dB at most, as at the start); an output came or went: the chosen one, if that's it
-		const bool def = audio_->take_default_changed(), devs = audio_->take_devices_changed();
-		if (!def && !devs) return;
-		const AudioInfo a = audio_info();
-		bool restart = def && (config_.device.empty() || a.missing);
-		if (devs && !config_.device.empty()) {
-			bool present = false;
-			for (const OutputDevice& d : audio_->devices()) present = present || d.id == config_.device;
-			restart = restart || present == a.missing || a.state == AWVA_AUDIO_FAILED;
-		}
-		if (restart) (void)restart_audio(true);
-	}
-	void midi_enable(const std::string& name, bool on) {
-		if (!midi_) return;
-		std::set<std::string> off = midi_->disabled();
-		if (on) off.erase(name);
-		else off.insert(name);
+	start_audio();
+	if (o.flag("midi", true)) {
+		midi_ = make_midi_in();
+		std::set<std::string> off;
+		for (const std::string& n : lines(setting("midi_off"))) off.insert(n);
 		midi_->set_disabled(off);
-		std::string v;
-		for (const std::string& n : off) v += n + "\n";
-		set_setting("midi_off", v);
-		midi_->refresh();
-	}
-	void inject(const uint32_t* w, int count) {
-		const uint64_t t = now_ns();
-		for (int i = 0; i < count;) {
-			const int n = std::min(ump_words(w[i]), count - i);
-			MidiEv e{t, {0, 0, 0, 0}};
-			std::memcpy(e.w, w + i, sizeof(uint32_t) * static_cast<size_t>(n));
-			(void)rings_[MidiIn::kSlots].push(e);
+		midi_->start([this](int slot, const uint32_t* w, int count, uint64_t ns) {
+			MidiEv e{ns, {0, 0, 0, 0}};
+			std::memcpy(e.w, w, sizeof(uint32_t) * static_cast<size_t>(std::min(count, 4)));
+			(void)rings_[slot].push(e);
 			midi_count_.fetch_add(1, std::memory_order_relaxed);
-			i += n;
-		}
+		});
 	}
+	return 0;
+}
+void Core::stop() {
+	if (shut_) return;
+	shut_ = true;
+	if (midi_) midi_->stop();
+	midi_.reset();
+	stop_audio();
+	apply_all();
+	if (probe_run_) {
+		probe_run_ = false;
+		probe_th_.join();
+		drain_probe();
+		wav_.close();
+	}
+	drain_rets();
+	delete player_.inst;
+	player_.inst = nullptr;
+}
+std::string Core::setting(const std::string& k) const {
+	auto it = settings_.find(k);
+	return it == settings_.end() ? "" : it->second;
+}
+void Core::set_setting(const std::string& k, const std::string& v) {
+	settings_[k] = v;
+	save_settings();
+}
+void Core::erase_setting(const std::string& k) {
+	if (settings_.erase(k)) save_settings();
+}
+void Core::save_settings() {
+	if (settings_path_.empty()) return;
+	std::string s = "{";
+	for (const auto& [a, b] : settings_) s += std::string(s.size() > 1 ? "," : "") + "\n  " + jstr(a) + ": " + jstr(b);
+	write_file(settings_path_, s + "\n}\n");
+}
+int Core::fail(const std::string& why) {
+	error_ = why;
+	return -1;
+}
+void Core::load_settings() {
+	std::string t;
+	Json j;
+	if (settings_path_.empty() || !read_file(settings_path_, &t) || !Json::parse(t, &j)) return;
+	for (const auto& [k, v] : j.o)
+		if (v.type == Json::String) settings_[k] = v.s;
+}
+std::vector<std::string> Core::lines(const std::string& s) {
+	std::vector<std::string> v;
+	size_t a = 0;
+	while (a < s.size()) {
+		size_t b = s.find('\n', a);
+		if (b == std::string::npos) b = s.size();
+		if (b > a) v.push_back(s.substr(a, b - a));
+		a = b + 1;
+	}
+	return v;
+}
 
-	AudioInfo audio_info() const {
-		AudioInfo i = fallback_ ? fallback_->info() : (audio_ ? audio_->info() : AudioInfo{});
-		i.glitches += glitches_base_;
-		i.recoveries += recoveries_base_;
-		if (fallback_) {
-			const AudioInfo d = audio_->info();
-			i.state = AWVA_AUDIO_FAILED;
-			i.message = d.message;
-			i.backend = d.backend;
-		}
-		return i;
-	}
-	std::string audio_json() const {
-		const AudioInfo i = audio_info();
-		static const char* names[] = {"off", "running", "null", "failed"};
-		return "{\"backend\":" + jstr(i.backend) + ",\"device\":" + jstr(i.device) + ",\"state\":" + jstr(names[std::clamp(i.state, 0, 3)]) +
-		    ",\"message\":" + jstr(i.message) + ",\"rate\":" + std::to_string(i.rate) + ",\"buffer\":" + std::to_string(i.buffer) +
-		    ",\"mode\":" + jstr(i.mode) + ",\"wanted\":" + jstr(config_.exclusive ? "exclusive" : "shared") + ",\"frames\":" + std::to_string(config_.frames) +
-		    ",\"exclusive_available\":" + (i.exclusive_available ? "true" : "false") + ",\"volume\":" + jnum(i.volume) +
-		    ",\"bus\":" + jstr(i.bus) + ",\"learned\":" + std::to_string(i.learned) + ",\"chosen\":" + jstr(config_.device) +
-		    ",\"missing\":" + (i.missing ? "true" : "false") + ",\"notice\":" +
-		    jstr(i.missing ? (setting("output_device_name").empty() ? "The output chosen" : setting("output_device_name")) + " isn't connected: playing the default" : "") +
-		    "}";
-	}
-	// every output endpoint: [{"id","name","bus","default"}...]
-	std::string devices_json() const {
-		std::string s = "[";
-		if (audio_)
-			for (const OutputDevice& d : audio_->devices())
-				s += std::string(s.size() > 1 ? "," : "") + "{\"id\":" + jstr(d.id) + ",\"name\":" + jstr(d.name) + ",\"bus\":" + jstr(d.bus) +
-				    ",\"default\":" + (d.is_default ? "true" : "false") + "}";
-		return s + "]";
-	}
-	// the output: an id devices() lists, or "" the system's default; kept for the next start (with its
-	// name, for the line when it's missing); the stream opened again on it, as at the start
-	int set_audio_device(const std::string& id) {
-		std::string name;
-		if (!id.empty()) {
-			for (const OutputDevice& d : audio_->devices())
-				if (d.id == id) name = d.name;
-			if (name.empty()) return fail("no such output");
-		}
-		config_.device = id;
-		set_setting("output_device", id);
-		set_setting("output_device_name", name);
-		return restart_audio(true);
-	}
-	// the output mode: "shared" (the default) or "exclusive" with a buffer of frames; restarts the audio
-	int set_audio_mode(const std::string& mode, int frames) {
-		config_.exclusive = mode == "exclusive";
-		if (config_.exclusive) { // (asked again: the endpoint's buffer measured again)
-			const AudioInfo a = audio_info();
-			if (!a.endpoint.empty()) {
-				config_.learned.erase(a.endpoint);
-				erase_setting(kLearned + a.endpoint);
-			}
-		}
-		if (frames >= 0) config_.frames = frames == 0 ? 0 : std::clamp(frames, 16, 4096); // (0: the smallest)
-		set_setting("audio_mode", config_.exclusive ? "exclusive" : "shared");
-		set_setting("exclusive_buffer", std::to_string(config_.frames));
-		audio_->configure(config_);
-		return restart_audio();
-	}
-
-	// the audio thread's glitches into <app data>/awva/audio.log, with the stream's state (UI thread)
-	void log_glitches() {
-		if (!audio_) return;
-		Glitch g[64];
-		const int k = audio_->take_glitches(g, 64);
-		if (k == 0) return;
-		const AudioInfo a = audio_info();
-		static const char* kinds[] = {"", "late wake-up", "slow render", "no event for 200 ms", "device failed"};
-		std::string s;
-		for (int i = 0; i < k; i++) {
-			char b[256];
-			std::snprintf(b, sizeof b, "%.3f s  %s  (since last %lld us, render %lld us, padding %u)  %s %s %d Hz, %d frames, period %d; %u glitches, %u re-opened\n",
-			    (g[i].ns - start_ns_) / 1e9, kinds[std::clamp(g[i].kind, 0, 4)], static_cast<long long>(g[i].dt_us), static_cast<long long>(g[i].render_us), g[i].pad,
-			    a.device.c_str(), a.mode.c_str(), a.rate, a.buffer, a.period, a.glitches, a.recoveries);
-			s += b;
-		}
-		std::string old;
-		const std::string path = join(app_data_dir(), "audio.log");
-		read_file(path, &old, 1u << 20);
-		if (old.size() > (1u << 19)) old = old.substr(old.size() - (1u << 18)); // (the last 256 KB kept)
-		write_file(path, old + s);
-	}
-
-	// what the stream learned about its endpoint (a Bluetooth endpoint's buffer, or shared only) into
-	// the settings, for the next start (UI thread)
-	void remember_endpoint() {
-		if (!audio_) return;
-		const AudioInfo a = audio_->info();
-		if (a.endpoint.empty() || a.learned == 0) return;
-		const std::string v = a.learned < 0 ? "shared" : std::to_string(a.learned);
-		config_.learned[a.endpoint] = a.learned;
-		if (setting(kLearned + a.endpoint) != v) set_setting(kLearned + a.endpoint, v);
-	}
-
-	// the delay from a key to the speaker, part by part: each figure measured or as the driver reports it
-	std::string latency_json() {
-		log_glitches();
-		remember_endpoint();
-		const AudioInfo a = audio_info();
-		const int64_t n = lat_n_.exchange(0);
-		const int64_t sum = lat_sum_.exchange(0), mn = lat_min_.exchange(INT64_MAX), mx = lat_max_.exchange(INT64_MIN);
-		if (n > 0) lat_last_ = {n, mn / 1e3, sum / 1e3 / n, mx / 1e3};
-		const double sr = std::max(1, a.rate);
-		const double period_ms = a.period * 1e3 / sr, buffer_ms = a.buffer * 1e3 / sr;
-		const double block_ms = NSC_BLOCK * 1e3 / sr, step_ms = 2.0;
-		// the total: the MIDI message to its frame (measured), the device's buffer and its own latency
-		// (reported); the engine's 2 ms step is inside the measured MIDI figure
-		const double midi = lat_last_.n ? lat_last_.mean : period_ms / 2;
-		const double out = period_ms + std::max(0.0f, a.stream_ms); // (one period queued, in both modes)
-		std::string s = "{\"mode\":" + jstr(a.mode) + ",\"rate\":" + std::to_string(a.rate);
-		s += ",\"period_frames\":" + std::to_string(a.period) + ",\"period_ms\":" + jnum(period_ms);
-		s += ",\"buffer_frames\":" + std::to_string(a.buffer) + ",\"buffer_ms\":" + jnum(buffer_ms);
-		s += ",\"queued_frames\":" + std::to_string(a.period) + ",\"queued_ms\":" + jnum(period_ms);
-		s += ",\"stream_ms\":" + jnum(a.stream_ms);
-		s += ",\"block_frames\":" + std::to_string(NSC_BLOCK) + ",\"block_ms\":" + jnum(block_ms) + ",\"step_ms\":" + jnum(step_ms);
-		s += ",\"midi_count\":" + std::to_string(lat_last_.n) + ",\"midi_min_ms\":" + jnum(lat_last_.min) + ",\"midi_mean_ms\":" + jnum(lat_last_.mean) +
-		    ",\"midi_max_ms\":" + jnum(lat_last_.max);
-		s += ",\"total_ms\":" + jnum(midi + out);
-		s += ",\"volume\":" + jnum(a.volume) + ",\"glitches\":" + std::to_string(a.glitches) + ",\"recoveries\":" + std::to_string(a.recoveries) + "}";
-		return s;
-	}
-
-	// new_device: the output changed (chosen, or the default playing changed): the level at -12 dB at
-	// most, as at the start
-	int restart_audio(bool new_device = false) {
-		const AudioInfo before = audio_info(); // (the counts carry over a restart)
-		glitches_base_ = before.glitches;
-		recoveries_base_ = before.recoveries;
-		remember_endpoint();
-		stop_audio();
-		audio_->configure(config_); // (with what the stream learned)
-		apply_all(); // (the audio thread is stopped: the UI thread applies what it hadn't)
-		drain_rets();
-		const int r = audio_->probe_rate(); // (exclusive mode may run at another rate than the mixer)
-		if (r > 0 && r != rate_) {
-			if (player_.inst && player_.inst->reinit(r) != 0) return fail("the engine doesn't run at " + std::to_string(r) + " Hz");
-			rate_ = r;
-		}
-		player_.prepare(rate_);
-		if (new_device && master_db_ > kStartMaxDb) { // (the audio thread is stopped)
-			master_db_ = kStartMaxDb;
-			player_.safety.set_target_db(kStartMaxDb);
-			set_setting("master_db", jnum(kStartMaxDb));
-		}
-		player_.safety.fade_in(0.300f);
-		start_audio();
-		return 0;
-	}
-
-	std::string setting(const std::string& k) const {
-		auto it = settings_.find(k);
-		return it == settings_.end() ? "" : it->second;
-	}
-	void set_setting(const std::string& k, const std::string& v) {
-		settings_[k] = v;
-		save_settings();
-	}
-	void erase_setting(const std::string& k) {
-		if (settings_.erase(k)) save_settings();
-	}
-	void save_settings() {
-		if (settings_path_.empty()) return;
-		std::string s = "{";
-		for (const auto& [a, b] : settings_) s += std::string(s.size() > 1 ? "," : "") + "\n  " + jstr(a) + ": " + jstr(b);
-		write_file(settings_path_, s + "\n}\n");
-	}
-
-	int fail(const std::string& why) {
-		error_ = why;
-		return -1;
-	}
-	std::string error_;
-
-	// --- the audio thread --------------------------------------------------------------------------
-	// the samples as they go to the device: the probe tap
-	void tap(const float* l, const float* r, uint32_t n) override {
-		if (probe_run_)
-			for (uint32_t i = 0; i < n; i++) (void)probe_.push({l[i], r[i]});
-	}
-	void render(float* l, float* r, uint32_t n, uint64_t host_ns) override {
-		const uint64_t t0 = now_ns();
-		Cmd c;
-		while (cmds_.pop(&c)) apply(c);
-		// MIDI: every ring's messages at their frames, in time order
-		const uint64_t base = player_.inst ? player_.inst->frame() : 0;
-		int k = 0;
-		for (auto& ring : rings_) {
-			MidiEv e;
-			while (k < kBatch && ring.pop(&e)) {
-				batch_[k].f = base;
-				batch_[k].ns = e.ns;
-				std::memcpy(batch_[k].w, e.w, sizeof e.w);
-				k++;
-			}
-		}
-		// (in arrival order, across the ports: an insertion sort, nothing allocated)
-		for (int i = 1; i < k; i++)
-			for (int j = i; j > 0 && batch_[j].ns < batch_[j - 1].ns; j--) std::swap(batch_[j], batch_[j - 1]);
-		const uint64_t step = static_cast<uint64_t>((rate_ + 499) / 500); // (the engine's 2 ms step, frames)
-		for (int i = 0; i < k; i++) {
-			const uint64_t f = spread_.place(batch_[i].f, step); // (step_spread.h: at most kPerStep a step)
-			player_.event(f, batch_[i].w);
-			// measured: from the message's time to its frame's time in this output stream
-			const double at = static_cast<double>(host_ns) + (static_cast<double>(f) - static_cast<double>(base)) * 1e9 / rate_;
-			const int64_t us = static_cast<int64_t>((at - static_cast<double>(batch_[i].ns)) / 1e3);
-			lat_n_.fetch_add(1, std::memory_order_relaxed);
-			lat_sum_.fetch_add(us, std::memory_order_relaxed);
-			int64_t m = lat_min_.load(std::memory_order_relaxed);
-			while (us < m && !lat_min_.compare_exchange_weak(m, us)) {
-			}
-			m = lat_max_.load(std::memory_order_relaxed);
-			while (us > m && !lat_max_.compare_exchange_weak(m, us)) {
-			}
-		}
-		const Safety::Result res = player_.render(l, r, n);
-		atomic_max(peak_l_, res.peak_l);
-		atomic_max(peak_r_, res.peak_r);
-		atomic_min(min_gain_, res.min_gain);
-		if (res.fault) faults_.fetch_add(1);
-		stopped_.store(player_.stopped ? 1 : 0);
-		voices_.store(player_.inst ? player_.inst->c.active_voices(player_.inst->state) : 0);
-		const float load = static_cast<float>(static_cast<double>(now_ns() - t0) * rate_ / (1e9 * n));
-		cpu_.store(std::max(load, cpu_.load() * 0.995f));
-		if (last_host_ns_ && host_ns - last_host_ns_ > static_cast<uint64_t>(2.5e9 * n / rate_)) xruns_.fetch_add(1);
-		last_host_ns_ = host_ns;
-	}
-
-private:
-	void apply(const Cmd& c) {
-		Instance* in = player_.inst;
-		switch (c.t) {
-		case Cmd::Swap: {
-			player_.strict = c.i != 0;
-			Instance* old = player_.swap(static_cast<Instance*>(c.p));
-			spread_.reset(player_.inst ? player_.inst->frame() : 0);
-			if (old) (void)rets_.push({Ret::Inst, old});
-			generation_.fetch_add(1);
-			return;
-		}
-		case Cmd::Master: player_.safety.set_target_db(c.v); return;
-		case Cmd::LoadText: {
-			auto* t = static_cast<std::string*>(c.p);
-			if (in) (void)in->c.load_preset(in->state, t->data(), static_cast<uint32_t>(t->size()), nullptr);
-			(void)rets_.push({Ret::Text, t});
-			generation_.fetch_add(1);
-			return;
-		}
-		default: break;
-		}
-		if (!in) return;
-		switch (c.t) {
-		case Cmd::SetParam: (void)in->c.set_param(in->state, c.i, c.v); break;
-		case Cmd::SetPreset:
-			in->c.set_preset(in->state, c.i);
-			generation_.fetch_add(1);
-			break;
-		case Cmd::Mono: in->set_mono(c.i != 0); break;
-		case Cmd::Panic:
-			in->c.reset(in->state);
-			in->count = 0;
-			break;
-		default: break;
-		}
-	}
-	// the UI thread, with the audio thread stopped
-	void apply_all() {
-		Cmd c;
-		while (cmds_.pop(&c)) apply(c);
-	}
-	void send(const Cmd& c) {
-		for (int k = 0; !cmds_.push(c); k++) {
-			if (k > 200) return; // (the audio thread isn't taking them: dropped)
-			std::this_thread::sleep_for(std::chrono::milliseconds(1));
-		}
-	}
-	void drain_rets() {
-		Ret r;
-		while (rets_.pop(&r)) {
-			if (r.t == Ret::Inst) delete static_cast<Instance*>(r.p);
-			else delete static_cast<std::string*>(r.p);
-		}
-	}
-	// the built-in engine's library a presets-only package plays (not stopped like a package's own)
-	const nsc_component* builtin_of(const Engine* e) const {
-		for (const Engine& b : catalog_.engines())
-			if (b.key.rfind("builtin:", 0) == 0 && b.c == e->c) return b.c;
-		return nullptr;
-	}
-	std::vector<std::string> heroes() const {
-		std::vector<std::string> v;
-		const nsc_desc& d = ui_->d;
-		const PresetEntry* p = engine_ && preset_ >= 0 && preset_ < static_cast<int>(engine_->presets.size()) ? &engine_->presets[static_cast<size_t>(preset_)] : nullptr;
-		if (p && p->factory < 0 && !p->heroes.empty()) return p->heroes;
-		const char* const* h = d.heroes;
-		if (p && p->factory >= 0 && d.presets[p->factory].heroes[0]) h = d.presets[p->factory].heroes;
-		for (int i = 0; i < NSC_MAX_HEROES && h[i]; i++) v.push_back(h[i]);
-		return v;
-	}
-	void start_audio() {
-		fallback_.reset();
-		if (!audio_->start(this)) {
-			fallback_ = make_null_audio(rate_); // (no device: the sound keeps running without one)
-			fallback_->start(this);
-		}
-	}
-	void stop_audio() {
-		if (fallback_) fallback_->stop();
-		fallback_.reset();
-		if (audio_) audio_->stop();
-	}
-	void probe_loop() {
-		while (probe_run_) {
-			drain_probe();
-			std::this_thread::sleep_for(std::chrono::milliseconds(20));
-		}
-	}
-	void drain_probe() {
-		Frame f;
-		while (probe_.pop(&f)) wav_.write(&f.l, &f.r, 1);
-	}
-	void load_settings() {
-		std::string t;
-		Json j;
-		if (settings_path_.empty() || !read_file(settings_path_, &t) || !Json::parse(t, &j)) return;
-		for (const auto& [k, v] : j.o)
-			if (v.type == Json::String) settings_[k] = v.s;
-	}
-	static std::vector<std::string> lines(const std::string& s) {
-		std::vector<std::string> v;
-		size_t a = 0;
-		while (a < s.size()) {
-			size_t b = s.find('\n', a);
-			if (b == std::string::npos) b = s.size();
-			if (b > a) v.push_back(s.substr(a, b - a));
-			a = b + 1;
-		}
-		return v;
-	}
-
-	uint64_t start_ns_ = now_ns();
-	Catalog catalog_;
-	Engine playing_;     // the playing engine's entry, should a rescan lose it
-	std::string folder_; // the packages folder at the last scan (Catalog::signature)
-	uint32_t catalog_gen_ = 0;
-	std::string builtin_dir_, user_dir_, settings_path_;
-	std::map<std::string, std::string> settings_;
-	static constexpr const char* kLearned = "exclusive_buffer_learned:"; // + the endpoint's id
-	bool no_audio_ = false, shut_ = false;
-	AudioConfig config_;
-	uint32_t glitches_base_ = 0, recoveries_base_ = 0;
-	std::unique_ptr<AudioOut> audio_, fallback_;
-	std::unique_ptr<MidiIn> midi_;
-	int rate_ = 48000;
-
-	// the UI's view
-	const Engine* engine_ = nullptr;
-	std::string engine_key_;
-	Instance* ui_ = nullptr;
-	int preset_ = -1;
-	bool mono_ = false;
-	float master_db_ = kStartDefaultDb;
-
-	// between the threads
-	Ring<Cmd, 1024> cmds_;
-	Ring<Ret, 1024> rets_;
-	Ring<MidiEv, 1024> rings_[MidiIn::kSlots + 1]; // the ports', then awva_ump()'s
-	Ring<Frame, 1u << 17> probe_;
-	std::atomic<float> peak_l_{0}, peak_r_{0}, min_gain_{1}, cpu_{0};
-	std::atomic<int> voices_{0}, stopped_{0};
-	std::atomic<uint32_t> midi_count_{0}, generation_{0}, xruns_{0}, faults_{0};
-
-	// the audio thread's
-	Player player_;
-	struct Batched {
-		uint64_t f, ns;
-		uint32_t w[4];
-	};
-	std::atomic<int64_t> lat_n_{0}, lat_sum_{0}, lat_min_{INT64_MAX}, lat_max_{INT64_MIN};
-	struct LatWindow {
-		int64_t n = 0;
-		double min = 0, mean = 0, max = 0;
-	} lat_last_;
-	static constexpr int kBatch = 2048;
-	Batched batch_[kBatch];
-	StepSpread spread_; // the frames MIDI is placed at, on the engine's steps
-	uint64_t last_host_ns_ = 0;
-
-	WavWriter wav_;
-	std::atomic<bool> probe_run_{false};
-	std::thread probe_th_;
-};
+namespace {
 
 std::unique_ptr<Core> g_core;
 std::string g_text;
 
 } // namespace
-
-// --- the C++ side (core.h) ---------------------------------------------------------------------------
-bool render_offline(const nsc_component& c, const PresetEntry* preset, bool mono, const std::vector<TimedUmp>& events, uint64_t frames,
-    int rate, float master_db, std::vector<float>* l, std::vector<float>* r, bool safety) {
-	auto in = std::make_unique<Instance>(c);
-	if (in->init(rate) != 0) return false;
-	if (preset && preset->factory >= 0) c.set_preset(in->state, preset->factory);
-	if (preset && preset->factory < 0 && c.load_preset(in->state, preset->text.data(), static_cast<uint32_t>(preset->text.size()), nullptr) != 1)
-		return false;
-	if (mono) in->set_mono(true);
-	Player p;
-	p.prepare(rate);
-	p.safety.set_now_db(master_db);
-	p.inst = in.get();
-	if (!safety) { // (the instance alone: what the Player gives the safety chain)
-		l->assign(static_cast<size_t>(frames), 0.0f);
-		r->assign(static_cast<size_t>(frames), 0.0f);
-		size_t k = 0;
-		for (uint64_t f = 0; f < frames; f += 256) {
-			const uint64_t n = std::min<uint64_t>(256, frames - f);
-			for (; k < events.size() && events[k].frame < f + n; k++) p.event(events[k].frame, events[k].w);
-			in->render(l->data() + f, r->data() + f, static_cast<uint32_t>(n));
-		}
-		p.inst = nullptr;
-		return true;
-	}
-	const uint64_t total = frames + Limiter::kDelay;
-	std::vector<float> a(static_cast<size_t>(total)), b(static_cast<size_t>(total));
-	size_t k = 0;
-	constexpr uint64_t kChunk = 256; // (any size gives the same samples: the instance's own block grid)
-	for (uint64_t f = 0; f < total; f += kChunk) {
-		const uint64_t n = std::min(kChunk, total - f);
-		for (; k < events.size() && events[k].frame < f + n; k++) p.event(events[k].frame, events[k].w);
-		(void)p.render(a.data() + f, b.data() + f, static_cast<uint32_t>(n));
-	}
-	p.inst = nullptr;
-	l->assign(a.begin() + Limiter::kDelay, a.end());
-	r->assign(b.begin() + Limiter::kDelay, b.end());
-	return true;
-}
-
-std::vector<uint32_t> midi1_to_ump(const uint8_t* bytes, size_t n) {
-	std::vector<uint32_t> out;
-	size_t i = 0;
-	while (i < n) {
-		const uint8_t s = bytes[i];
-		if (s < 0x80) {
-			i++;
-			continue;
-		}
-		if (s >= 0xf0) { // (system: skipped, a SysEx to its end)
-			i++;
-			if (s == 0xf0)
-				while (i < n && bytes[i] != 0xf7) i++;
-			continue;
-		}
-		const uint8_t hi = s & 0xf0;
-		const size_t len = hi == 0xc0 || hi == 0xd0 ? 2 : 3;
-		if (i + len > n) break;
-		const uint32_t d1 = bytes[i + 1] & 0x7f, d2 = len == 3 ? bytes[i + 2] & 0x7f : 0;
-		out.push_back(0x20000000u | static_cast<uint32_t>(s) << 16 | d1 << 8 | d2);
-		i += len;
-	}
-	return out;
-}
-
-std::vector<TimedUmp> mpe_controller_performance(int rate, double seconds) {
-	std::vector<TimedUmp> v;
-	auto cc = [&](uint64_t f, int ch, int c, int val) { v.push_back({f, {0x20b00000u | static_cast<uint32_t>(ch) << 16 | static_cast<uint32_t>(c) << 8 | static_cast<uint32_t>(val), 0, 0, 0}}); };
-	auto msg = [&](uint64_t f, uint32_t status, int ch, int d1, int d2) {
-		v.push_back({f, {0x20000000u | (status | static_cast<uint32_t>(ch)) << 16 | static_cast<uint32_t>(d1) << 8 | static_cast<uint32_t>(d2), 0, 0, 0}});
-	};
-	const int voices = 4;
-	const double range = 48.0;
-	// midi_config(): the MCM on channel 1 (index 0), the bend range on each member channel
-	cc(0, 0, 101, 0);
-	cc(0, 0, 100, 6);
-	cc(0, 0, 6, voices);
-	cc(0, 0, 101, 127);
-	cc(0, 0, 100, 127);
-	for (int n = 0; n < voices; n++) {
-		cc(0, 1 + n, 101, 0);
-		cc(0, 1 + n, 100, 0);
-		cc(0, 1 + n, 6, static_cast<int>(range));
-		cc(0, 1 + n, 101, 127);
-		cc(0, 1 + n, 100, 127);
-	}
-	// a phrase: four notes, each on its own member channel (voice n: channel 2 + n), overlapping,
-	// with a glide on the third and vibrato on the last; the controller's update rate is about 1 kHz
-	const int keys[4] = {62, 66, 69, 74};
-	const double on_s[4] = {0.10, 0.55, 1.00, 1.45};
-	const double len_s[4] = {1.20, 1.10, 1.00, std::max(1.2, seconds - 1.75)};
-	for (int n = 0; n < voices; n++) {
-		const int ch = 1 + n;
-		const uint64_t on = static_cast<uint64_t>(on_s[n] * rate);
-		const uint64_t off = static_cast<uint64_t>((on_s[n] + len_s[n]) * rate);
-		auto bend14 = [&](double semis) { return std::clamp(static_cast<int>(semis * (8192.0 / range) + 8192.0 + 0.5), 0, 16383); };
-		int b = bend14(0.0);
-		msg(on, 0xe0, ch, b & 0x7f, b >> 7); // (the bend before the Note On: the tuning)
-		msg(on, 0x90, ch, keys[n], 70 + 10 * n);
-		int last_p = -1, last_y = -1, last_b = b;
-		for (uint64_t f = on + rate / 1000; f < off; f += static_cast<uint64_t>(rate / 1000)) {
-			const double t = static_cast<double>(f - on) / rate, T = static_cast<double>(off - on) / rate;
-			const double env = std::min(1.0, t / 0.08) * std::min(1.0, (T - t) / 0.15);
-			const int p = std::clamp(static_cast<int>((0.35 + 0.45 * env + 0.1 * std::sin(6.0 * t)) * 127.0 * env + 0.5), 0, 127);
-			const int y = std::clamp(static_cast<int>(64 + 64 * 0.4 * std::sin(1.3 * t + n) + 0.5), 0, 127);
-			double semis = 0.0;
-			if (n == 2 && t > 0.4) semis = std::min(2.0, (t - 0.4) * 4.0); // a glide up a tone
-			if (n == 3 && t > 0.3) semis = 0.25 * std::sin(2.0 * 3.14159265358979 * 5.5 * (t - 0.3)); // vibrato
-			b = bend14(semis);
-			if (b != last_b) msg(f, 0xe0, ch, b & 0x7f, b >> 7), last_b = b;
-			if (p != last_p) msg(f, 0xd0, ch, p, 0), last_p = p;
-			if (y != last_y) cc(f, ch, 74, y), last_y = y;
-		}
-		msg(off, 0x80, ch, keys[n], 64);
-	}
-	std::stable_sort(v.begin(), v.end(), [](const TimedUmp& a, const TimedUmp& b) { return a.frame < b.frame; });
-	return v;
-}
 
 } // namespace awva_app
 

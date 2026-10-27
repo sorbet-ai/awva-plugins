@@ -45,12 +45,6 @@ public:
 		r_.store(r + 1, std::memory_order_release);
 		return true;
 	}
-	bool peek(T* v) const {
-		const size_t r = r_.load(std::memory_order_relaxed);
-		if (r == w_.load(std::memory_order_acquire)) return false;
-		*v = buf_[r & (N - 1)];
-		return true;
-	}
 
 private:
 	T buf_[N];

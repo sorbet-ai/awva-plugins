@@ -9,6 +9,7 @@
 #   awva_app_cli           the core without the UI: list, smoke (the null sink), render
 #   ctest -L app           the core's checks, the smoke run, and the app's output against each plugin's
 set(_src src/app.cpp src/catalog.cpp src/platform.cpp src/audio_null.cpp src/audio_query.cpp)
+list(APPEND _src src/app_sound.cpp src/app_io.cpp src/app_render.cpp src/offline.cpp) # (the core's parts: app_core.h)
 if(WIN32)
   list(APPEND _src src/audio_wasapi.cpp src/midi_winmm.cpp)
 elseif(APPLE)
