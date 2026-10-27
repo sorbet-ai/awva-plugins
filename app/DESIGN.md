@@ -96,6 +96,11 @@ DM Sans (bundled, OFL, variable), tabular figures everywhere.
 - **Dot**: 8 px: MIDI (blue while messages arrive), a port (sage open, butter busy, error failed).
 - **Icons**: drawn, 16 px, 1.6 px lines with round ends: chevrons, settings (three ribbons with
   stops), theme (a half-filled circle), close, refresh, stop.
+- **Keyboard**: every control is in the Tab order (the header left to right, then the sound): Enter
+  or Space presses a button, a picker, a switch or a segment; the arrow keys turn a knob, a row's
+  ribbon or the level (Shift: fine), Home and End go to the ends, Delete to the default. The
+  control with the focus wears a 1.5 px sage ring 2 px outside it; Esc closes the settings panel
+  or a menu. Ctrl+R (Cmd+R) rescans the engines.
 
 ## 4. Layout
 
@@ -119,7 +124,8 @@ DM Sans (bundled, OFL, variable), tabular figures everywhere.
 
 - **Header**: the logo (22 px high); the engine picker (a package shows its label in a butter
   chip); the preset picker between previous and next; then, right: MIDI, the level, the theme,
-  settings.
+  settings. The pickers take what the rest leaves (the engine's three fifths, 240 px each at
+  most) and ellipsize, title first, chip after; under 900 px the MIDI word goes, its dot stays.
 - **The sound**: its name, the engine's summary, then the heroes (the preset's own, else the
   engine's; eight at most), four to a row. "Every parameter" opens the grouped list below.
 - **Footer**: audio (device, rate, buffer; an error in `error`), CPU, the limiter while it works;

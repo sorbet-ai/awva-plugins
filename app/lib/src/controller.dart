@@ -18,7 +18,7 @@ class Controller extends ChangeNotifier {
     _reload();
     if (poll) {
       _fast = Timer.periodic(const Duration(milliseconds: 33), (_) => _tick());
-      _slow = Timer.periodic(const Duration(seconds: 2), (_) => _slowTick());
+      _slow = Timer.periodic(const Duration(seconds: 2), (_) => slowTick());
     }
   }
 
@@ -85,7 +85,8 @@ class Controller extends ChangeNotifier {
   String? note;
   DateTime _noteAt = DateTime(0);
 
-  void _slowTick() {
+  /// the two-second tick: the ports and the output read again (a test calls it)
+  void slowTick() {
     core.midiRefresh();
     ports = core.midiPorts();
     audio = core.audio();
