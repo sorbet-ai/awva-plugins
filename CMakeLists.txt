@@ -261,6 +261,7 @@ foreach(v IN LISTS AWVA_PLUGIN_ENGINES)
     "-DMAKE_MIDI=$<TARGET_FILE:make_test_midi>" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/midi_proof.cmake")
   add_test(NAME plugin.${v}.ump COMMAND clap_host_test ump "${_clap}" "${_lib}")
   add_test(NAME plugin.${v}.notes COMMAND clap_host_test notes "${_clap}")
+  add_test(NAME plugin.${v}.stress COMMAND clap_host_test stress "${_clap}" 20)
   awva_add_component(awva_${v}_conformance_lib ${v} MODULE)
   set_target_properties(awva_${v}_conformance_lib PROPERTIES OUTPUT_NAME "conformance_${v}" PREFIX ""
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/conformance")
