@@ -68,10 +68,8 @@ std::vector<OutputDevice> alsa_outputs() {
 		std::free(io);
 		const bool server = name == "pipewire" || name == "pulse" || name == "jack";
 		if (!output || !(server || name.rfind("sysdefault:", 0) == 0 || name.rfind("hdmi:", 0) == 0 || name.rfind("bluealsa", 0) == 0)) continue;
-		std::string label = desc.substr(0, desc.find('
-'));
-		const size_t nl = desc.find('
-');
+		const size_t nl = desc.find('\n');
+		std::string label = desc.substr(0, nl);
 		if (nl != std::string::npos && name.rfind("hdmi:", 0) == 0) label += ", " + desc.substr(nl + 1); // (which HDMI output)
 		const std::string driver = card_driver(name);
 		const std::string enumerator = name.rfind("bluealsa", 0) == 0 ? "BLUETOOTH" : (driver == "USB-Audio" ? "USB" : driver);
