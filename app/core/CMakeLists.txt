@@ -85,7 +85,7 @@ add_test(NAME app.core COMMAND app_tests "${AWVA_APP_OUT}/engines" "${CMAKE_CURR
 add_test(NAME app.smoke COMMAND awva_app_cli smoke --engine builtin:va --seconds 3 --probe "${CMAKE_CURRENT_BINARY_DIR}/smoke.wav"
   --builtin "${AWVA_APP_OUT}/engines" --engines "${CMAKE_CURRENT_BINARY_DIR}/no-packages")
 set_tests_properties(app.core app.smoke PROPERTIES LABELS app)
-foreach(v IN LISTS AWVA_PLUGIN_ENGINES)
+foreach(v IN LISTS AWVA_ENGINES)
   add_dependencies(render_equal awva_${v}_clap)
   if(APPLE)
     set(_clap "$<TARGET_BUNDLE_DIR:awva_${v}_clap>")

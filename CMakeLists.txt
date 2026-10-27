@@ -53,7 +53,6 @@ target_compile_options(awva_host_options INTERFACE -Wall -Wextra)
 enable_testing()
 set(AWVA_VERSION "${AWVA_COMMIT}") # (the components' version, nsc_desc.version: the pinned commit)
 add_subdirectory("${AWVA_DIR}/sdk" awva/sdk EXCLUDE_FROM_ALL) # (only what the plugins and proofs use is built)
-set(AWVA_PLUGIN_ENGINES "${AWVA_ENGINES}") # (every engine of the pinned awva: a new one is a plugin at the next configure)
 
 # --- clap-wrapper (the submodule): its functions only -------------------------------------------------
 set(CLAP_WRAPPER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/clap-wrapper")
@@ -101,10 +100,7 @@ target_compile_definitions(awva_plugin_core PRIVATE $<$<PLATFORM_ID:Windows>:_CR
 set(_codes "")
 set(AWVA_PLUGIN_BUNDLES "")
 set(_au_targets "")
-foreach(v IN LISTS AWVA_PLUGIN_ENGINES)
-  if(NOT v IN_LIST AWVA_ENGINES)
-    message(FATAL_ERROR "AWVA_PLUGIN_ENGINES: ${v} is not an awva engine (${AWVA_ENGINES})")
-  endif()
+foreach(v IN LISTS AWVA_ENGINES) # (every engine of the pinned awva: a new one is a plugin at the next configure)
   # the AU subtype: the id's first four letters, the first capitalised, "_" filling ("va" -> Va__)
   string(SUBSTRING "${v}____" 0 4 _code)
   string(SUBSTRING "${_code}" 0 1 _c0)
@@ -158,7 +154,7 @@ endforeach()
 add_custom_target(awva_plugins DEPENDS ${AWVA_PLUGIN_BUNDLES})
 # the AU codes, for tests/auval_mac.sh and the validators
 set(_au "")
-foreach(v IN LISTS AWVA_PLUGIN_ENGINES)
+foreach(v IN LISTS AWVA_ENGINES)
   string(APPEND _au "${v} aumu ${AWVA_AU_SUBTYPE_${v}} Awva\n")
 endforeach()
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/au_codes.txt" "${_au}")
@@ -205,7 +201,7 @@ if(NOT WIN32 AND NOT APPLE) # Linux: the host's own X connection and window
   target_link_libraries(editor_host_test PRIVATE PkgConfig::AWVA_X11)
 endif()
 foreach(v IN ITEMS bowed va)
-  if(v IN_LIST AWVA_PLUGIN_ENGINES)
+  if(v IN_LIST AWVA_ENGINES)
     add_dependencies(editor_host_test awva_${v}_clap)
     if(APPLE)
       set(_clap "$<TARGET_BUNDLE_DIR:awva_${v}_clap>")
@@ -244,7 +240,7 @@ endif()
 set(_xp -DOUT=${CMAKE_CURRENT_BINARY_DIR}/proof "-DRENDER=$<TARGET_FILE:awva_render>" "-DMAKE=$<TARGET_FILE:make_expressive>"
   "-DCLAP_HOST=$<TARGET_FILE:clap_host_test>")
 set(_bench_cmds "")
-foreach(v IN LISTS AWVA_PLUGIN_ENGINES)
+foreach(v IN LISTS AWVA_ENGINES)
   add_dependencies(clap_host_test awva_${v}_clap)
   add_dependencies(vst3_host_test awva_${v}_vst3)
   if(APPLE)
@@ -299,7 +295,7 @@ foreach(v IN LISTS AWVA_PLUGIN_ENGINES)
 endforeach()
 # the CPU load and latency of every engine and format, one at a time (build/bench/<engine>.txt, and
 # the table: build/bench/table.md)
-string(REPLACE ";" "," _engines "${AWVA_PLUGIN_ENGINES}")
+string(REPLACE ";" "," _engines "${AWVA_ENGINES}")
 add_custom_target(awva_bench ${_bench_cmds}
   COMMAND "${CMAKE_COMMAND}" "-DOUT=${CMAKE_CURRENT_BINARY_DIR}/bench" "-DENGINES=${_engines}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/bench_table.cmake"
   USES_TERMINAL VERBATIM)
@@ -309,10 +305,7 @@ if(APPLE)
 endif()
 
 # --- the standalone app's core (app/core: the Flutter app's engine, MIDI and audio) -----------------------
-option(AWVA_APP "build the standalone app's core (app/core)" ON)
-if(AWVA_APP)
-  add_subdirectory(app/core)
-endif()
+add_subdirectory(app/core)
 
 # clap-wrapper's own libraries are C++17 code (char8_t paths and its fmt break under C++20): every
 # target it made in this directory and its own

@@ -109,7 +109,7 @@ install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
 
 # The awva core and the built-in engines, from the repository's own build (./build.sh build at the
 # root: build/app), the same toolchain as the plugins
-set(AWVA_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../build/app" CACHE PATH "the core's build: awva_app_core.dll, engines/")
+set(AWVA_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../build/app") # (the core's build: awva_app_core.dll, engines/)
 if(NOT EXISTS "${AWVA_CORE_DIR}/awva_app_core.dll")
   message(FATAL_ERROR "no awva core in ${AWVA_CORE_DIR}: build it first (./build.sh build at the repository's root)")
 endif()
