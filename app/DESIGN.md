@@ -72,8 +72,8 @@ DM Sans (bundled, OFL, variable), tabular figures everywhere.
 
 - **Knob** (76 px): a 270° track in bg3, the value as a sage arc from the minimum (from zero for a
   range that crosses zero), a short pointer at the value. The value sits inside it, the name under
-  it (`_` shown as a space). Drag up or down (200 px for the whole range; Shift: 800 px), scroll,
-  double click for the default. A toggle parameter is a switch instead of a knob.
+  it (`_` shown as a space). Drag up or down (200 px for the whole range; Shift: 800 px), scroll
+  (the wheel is the knob's alone: the page doesn't scroll under it), double click for the default. A toggle parameter is a switch instead of a knob.
 - **Slider row** (in "Every parameter"): name (180 px), a 4 px ribbon, the value (64 px, right).
   Click or drag anywhere on the ribbon; double click for the default.
 - **Level**: a 112 px ribbon with a round handle, -60 to +6 dB (double click: -18 dB), and under it
@@ -113,9 +113,14 @@ DM Sans (bundled, OFL, variable), tabular figures everywhere.
 - **The sound**: its name, the engine's summary, then the heroes (the preset's own, else the
   engine's; eight at most), four to a row. "Every parameter" opens the grouped list below.
 - **Footer**: audio (device, rate, buffer; an error in `error`), CPU, the limiter while it works;
-  right: the MIDI inputs open, or a port's problem in butter.
-- **Settings panel** (380 px, over the right edge): Appearance; Audio output (device, backend,
-  rate, buffer, "Follows the system volume", Restart audio); MIDI inputs (each with its dot and a
+  right: the MIDI inputs open, or a port's problem in butter. A line in butter only where the user
+  can act on it (the output chosen missing, a Bluetooth output playing shared).
+
+Text: the figures and the controls, no explanations; a notice only where it asks for an action.
+- **Settings panel** (380 px, over the right edge): Appearance; Audio output (the output picker:
+  System default, then every device with its bus, Bluetooth, USB or wired; the device playing, its
+  bus, backend, mode, rate; shared or exclusive and the buffer; Restart audio); the delay, key to
+  sound (the figures only); MIDI inputs (each with its dot and a
   switch, a busy port's message under it); Play (mono, All notes off); Your engines (the folder,
   Rescan, each package with its engine and version, or why it was refused).
 - **Engine menu**: "built in" (one line per engine), then "your engines" (the package's label,

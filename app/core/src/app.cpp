@@ -88,6 +88,7 @@ public:
 		no_audio_ = o.flag("no_audio", false);
 		audio_ = no_audio_ ? make_null_audio(48000) : make_device_audio();
 		AudioConfig cfg;
+		cfg.device = setting("output_device"); // ("" the system's default)
 		cfg.exclusive = setting("audio_mode") == "exclusive";
 		cfg.frames = 256; // (exclusive: 256 frames, about 5 ms, unless chosen; 0 is the device's smallest)
 		if (!setting("exclusive_buffer").empty()) cfg.frames = std::max(0, std::atoi(setting("exclusive_buffer").c_str()));
@@ -95,6 +96,8 @@ public:
 		if (no_audio_) { // (the null sink as a fake endpoint, tests: buffer_policy.h)
 			cfg.simulate_bus = o.str("simulate_bus", "");
 			cfg.simulate_wake_ms = o.num("simulate_wake_ms", 0);
+			if (const Json* d = o.get("simulate_devices"))
+				for (const Json& x : d->a) cfg.simulate_devices.push_back({x.str("id"), x.str("name"), x.str("bus", "other"), false});
 		}
 		// what earlier streams learned per endpoint: the exclusive buffer it sustains, or shared only
 		for (const auto& [k, v] : settings_)
@@ -109,6 +112,7 @@ public:
 		if (!setting("master_db").empty()) db = std::min(static_cast<float>(std::atof(setting("master_db").c_str())), kStartMaxDb);
 		player_.safety.set_target_db(db);
 		player_.safety.fade_in(0.300f);
+		master_db_ = db;
 
 		// the sound: the last engine and preset, else the first engine
 		std::string key = setting("engine");
@@ -298,8 +302,19 @@ public:
 		drain_rets();
 		if (midi_) midi_->refresh();
 		rescan_if_changed(); // (a package written while the app runs is listed within two seconds)
-		// the system's default output changed: play on the new one (faded in, as at the start)
-		if (!no_audio_ && audio_ && audio_->take_default_changed()) (void)restart_audio();
+		if (!audio_) return;
+		// the system's default output changed: play on the new one, if it's the one playing (faded in,
+		// at -12 dB at most, as at the start); an output came or went: the chosen one, if that's it
+		const bool def = audio_->take_default_changed(), devs = audio_->take_devices_changed();
+		if (!def && !devs) return;
+		const AudioInfo a = audio_info();
+		bool restart = def && (config_.device.empty() || a.missing);
+		if (devs && !config_.device.empty()) {
+			bool present = false;
+			for (const OutputDevice& d : audio_->devices()) present = present || d.id == config_.device;
+			restart = restart || present == a.missing || a.state == AWVA_AUDIO_FAILED;
+		}
+		if (restart) (void)restart_audio(true);
 	}
 	void midi_enable(const std::string& name, bool on) {
 		if (!midi_) return;
@@ -343,7 +358,33 @@ public:
 		    ",\"message\":" + jstr(i.message) + ",\"rate\":" + std::to_string(i.rate) + ",\"buffer\":" + std::to_string(i.buffer) +
 		    ",\"mode\":" + jstr(i.mode) + ",\"wanted\":" + jstr(config_.exclusive ? "exclusive" : "shared") + ",\"frames\":" + std::to_string(config_.frames) +
 		    ",\"exclusive_available\":" + (i.exclusive_available ? "true" : "false") + ",\"volume\":" + jnum(i.volume) +
-		    ",\"bus\":" + jstr(i.bus) + ",\"learned\":" + std::to_string(i.learned) + "}";
+		    ",\"bus\":" + jstr(i.bus) + ",\"learned\":" + std::to_string(i.learned) + ",\"chosen\":" + jstr(config_.device) +
+		    ",\"missing\":" + (i.missing ? "true" : "false") + ",\"notice\":" +
+		    jstr(i.missing ? (setting("output_device_name").empty() ? "The output chosen" : setting("output_device_name")) + " isn't connected: playing the default" : "") +
+		    "}";
+	}
+	// every output endpoint: [{"id","name","bus","default"}...]
+	std::string devices_json() const {
+		std::string s = "[";
+		if (audio_)
+			for (const OutputDevice& d : audio_->devices())
+				s += std::string(s.size() > 1 ? "," : "") + "{\"id\":" + jstr(d.id) + ",\"name\":" + jstr(d.name) + ",\"bus\":" + jstr(d.bus) +
+				    ",\"default\":" + (d.is_default ? "true" : "false") + "}";
+		return s + "]";
+	}
+	// the output: an id devices() lists, or "" the system's default; kept for the next start (with its
+	// name, for the line when it's missing); the stream opened again on it, as at the start
+	int set_audio_device(const std::string& id) {
+		std::string name;
+		if (!id.empty()) {
+			for (const OutputDevice& d : audio_->devices())
+				if (d.id == id) name = d.name;
+			if (name.empty()) return fail("no such output");
+		}
+		config_.device = id;
+		set_setting("output_device", id);
+		set_setting("output_device_name", name);
+		return restart_audio(true);
 	}
 	// the output mode: "shared" (the default) or "exclusive" with a buffer of frames; restarts the audio
 	int set_audio_mode(const std::string& mode, int frames) {
@@ -413,18 +454,20 @@ public:
 		const double out = period_ms + std::max(0.0f, a.stream_ms); // (one period queued, in both modes)
 		std::string s = "{\"mode\":" + jstr(a.mode) + ",\"rate\":" + std::to_string(a.rate);
 		s += ",\"period_frames\":" + std::to_string(a.period) + ",\"period_ms\":" + jnum(period_ms);
-		s += ",\"buffer_frames\":" + std::to_string(a.buffer) + ",\"buffer_ms\":" + jnum(buffer_ms) + ",\"buffer_source\":\"reported by the driver\"";
+		s += ",\"buffer_frames\":" + std::to_string(a.buffer) + ",\"buffer_ms\":" + jnum(buffer_ms);
 		s += ",\"queued_frames\":" + std::to_string(a.period) + ",\"queued_ms\":" + jnum(period_ms);
-		s += ",\"stream_ms\":" + jnum(a.stream_ms) + ",\"stream_source\":\"reported by the driver\"";
+		s += ",\"stream_ms\":" + jnum(a.stream_ms);
 		s += ",\"block_frames\":" + std::to_string(NSC_BLOCK) + ",\"block_ms\":" + jnum(block_ms) + ",\"step_ms\":" + jnum(step_ms);
 		s += ",\"midi_count\":" + std::to_string(lat_last_.n) + ",\"midi_min_ms\":" + jnum(lat_last_.min) + ",\"midi_mean_ms\":" + jnum(lat_last_.mean) +
-		    ",\"midi_max_ms\":" + jnum(lat_last_.max) + ",\"midi_source\":\"measured\"";
-		s += ",\"total_ms\":" + jnum(midi + out) + ",\"total_source\":" + jstr(lat_last_.n ? "measured MIDI + reported output" : "reported output + one buffer");
+		    ",\"midi_max_ms\":" + jnum(lat_last_.max);
+		s += ",\"total_ms\":" + jnum(midi + out);
 		s += ",\"volume\":" + jnum(a.volume) + ",\"glitches\":" + std::to_string(a.glitches) + ",\"recoveries\":" + std::to_string(a.recoveries) + "}";
 		return s;
 	}
 
-	int restart_audio() {
+	// new_device: the output changed (chosen, or the default playing changed): the level at -12 dB at
+	// most, as at the start
+	int restart_audio(bool new_device = false) {
 		const AudioInfo before = audio_info(); // (the counts carry over a restart)
 		glitches_base_ = before.glitches;
 		recoveries_base_ = before.recoveries;
@@ -439,6 +482,11 @@ public:
 			rate_ = r;
 		}
 		player_.prepare(rate_);
+		if (new_device && master_db_ > kStartMaxDb) { // (the audio thread is stopped)
+			master_db_ = kStartMaxDb;
+			player_.safety.set_target_db(kStartMaxDb);
+			set_setting("master_db", jnum(kStartMaxDb));
+		}
 		player_.safety.fade_in(0.300f);
 		start_audio();
 		return 0;
@@ -892,6 +940,12 @@ AWVA_APP_API const char* awva_audio(void) {
 }
 AWVA_APP_API int32_t awva_audio_restart(void) { return g_core ? g_core->restart_audio() : -1; }
 AWVA_APP_API int32_t awva_set_audio_mode(const char* mode, int32_t frames) { return g_core && mode ? g_core->set_audio_mode(mode, frames) : -1; }
+AWVA_APP_API const char* awva_audio_devices(void) {
+	static std::string s;
+	s = g_core ? g_core->devices_json() : "[]";
+	return s.c_str();
+}
+AWVA_APP_API int32_t awva_set_audio_device(const char* id) { return g_core && id ? g_core->set_audio_device(id) : -1; }
 AWVA_APP_API const char* awva_latency(void) {
 	static std::string s;
 	s = g_core ? g_core->latency_json() : "{}";

@@ -78,14 +78,11 @@ public:
 		learned_ = frames * 2;
 		return Action::StepUp;
 	}
-	// the stream's line for the user ("" none): why the buffer is what it is, or why it plays shared
-	std::string note(bool exclusive_wanted, int frames) const {
-		if (bus_ != Bus::Bluetooth || !exclusive_wanted) return {};
-		if (learned_ < 0)
-			return "Bluetooth output: exclusive mode glitched" + (tried_ > 0 ? " up to " + std::to_string(tried_) + " frames" : std::string()) +
-			    ", playing shared";
-		if (learned_ > 0) return "Bluetooth output: the buffer raised to " + std::to_string(frames) + " frames after glitches";
-		return "Bluetooth output: the buffer at least the device's period (" + std::to_string(frames) + " frames)";
+	// the stream's line for the user ("" none): exclusive asked for, shared playing (the user may try
+	// exclusive again)
+	std::string note(bool exclusive_wanted) const {
+		if (bus_ != Bus::Bluetooth || !exclusive_wanted || learned_ >= 0) return {};
+		return "Bluetooth output: exclusive mode glitched" + (tried_ > 0 ? " up to " + std::to_string(tried_) + " frames" : std::string()) + ", playing shared";
 	}
 	const std::string& id() const { return id_; }
 	Bus bus() const { return bus_; }

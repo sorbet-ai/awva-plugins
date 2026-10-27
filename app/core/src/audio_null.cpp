@@ -10,7 +10,9 @@
 // WASAPI's is; with simulate_wake_ms it wakes at most that often (the times on a grid of that step,
 // as a Bluetooth radio's bursts): a period shorter than that comes late, a late wake-up as WASAPI
 // sees one (more than a period and a half after the last), on the schedule's own clock, so a test
-// sees the same glitches on any machine.
+// sees the same glitches on any machine. With AudioConfig::simulate_devices it lists that fake
+// endpoint list (the first the default) and plays the one chosen as the fake endpoint, on its bus
+// (the default, info().missing, when the chosen one isn't listed).
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -44,11 +46,27 @@ public:
 		run_ = true;
 		const bool sim = !std::isnan(config_.simulate_db);
 		if (sim) gain_.reset(endpoint_gain(config_.simulate_db, 1.0f, false, false, false));
-		const bool fake = !config_.simulate_bus.empty();
+		const bool fake = !config_.simulate_bus.empty() || !config_.simulate_devices.empty();
 		policy_ = EndpointBuffer{};
-		if (fake) {
-			const auto it = config_.learned.find(kFakeId);
-			policy_.endpoint(kFakeId, bus_from_name(config_.simulate_bus), it == config_.learned.end() ? 0 : it->second);
+		{
+			std::lock_guard<std::mutex> g(m_);
+			id_ = kFakeId;
+			name_.clear();
+			missing_ = false;
+			Bus bus = bus_from_name(config_.simulate_bus);
+			if (!config_.simulate_devices.empty()) {
+				const OutputDevice* d = &config_.simulate_devices.front();
+				missing_ = !config_.device.empty();
+				for (const OutputDevice& x : config_.simulate_devices)
+					if (!config_.device.empty() && x.id == config_.device) d = &x, missing_ = false;
+				id_ = d->id;
+				name_ = d->name;
+				bus = bus_from_name(d->bus);
+			}
+			if (fake) {
+				const auto it = config_.learned.find(id_);
+				policy_.endpoint(id_, bus, it == config_.learned.end() ? 0 : it->second);
+			}
 		}
 		open_stream(fake);
 		th_ = std::thread([this, cb, sim, fake] {
@@ -74,7 +92,8 @@ public:
 		std::lock_guard<std::mutex> g(m_);
 		AudioInfo i;
 		i.backend = "null";
-		i.device = fake_ ? std::string("fake endpoint (") + bus_name(policy_.bus()) + ")" : "no audio device";
+		i.device = !name_.empty() ? name_ : (fake_ ? std::string("fake endpoint (") + bus_name(policy_.bus()) + ")" : "no audio device");
+		i.missing = missing_;
 		i.state = AWVA_AUDIO_NULL;
 		i.rate = rate_;
 		i.buffer = period_;
@@ -83,7 +102,7 @@ public:
 		i.message = note_;
 		i.exclusive_available = fake_;
 		if (fake_) {
-			i.endpoint = kFakeId;
+			i.endpoint = id_;
 			i.bus = bus_name(policy_.bus());
 			i.learned = policy_.learned();
 		}
@@ -93,6 +112,11 @@ public:
 		return i;
 	}
 	int probe_rate() override { return rate_; }
+	std::vector<OutputDevice> devices() override {
+		std::vector<OutputDevice> v = config_.simulate_devices;
+		for (size_t k = 0; k < v.size(); k++) v[k].is_default = k == 0;
+		return v;
+	}
 
 private:
 	// a stream's buffer and mode: the null sink's own, or the fake endpoint's (exclusive by the policy)
@@ -109,7 +133,7 @@ private:
 			period_ = exclusive_ ? f : dev_default;
 			mode_ = exclusive_ ? "exclusive" : "shared";
 		}
-		note_ = fake ? policy_.note(config_.exclusive, period_) : "";
+		note_ = fake ? policy_.note(config_.exclusive) : "";
 	}
 
 	// one stream, until stopped (false) or opened again (true)
@@ -142,8 +166,8 @@ private:
 
 	int rate_, period_ = 256;
 	mutable std::mutex m_;
-	bool fake_ = false, exclusive_ = false;
-	std::string mode_ = "null", note_;
+	bool fake_ = false, exclusive_ = false, missing_ = false;
+	std::string mode_ = "null", note_, id_ = kFakeId, name_;
 	EndpointBuffer policy_;
 	EndpointGain gain_;
 	std::atomic<bool> run_{false};

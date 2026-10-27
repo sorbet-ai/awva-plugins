@@ -27,6 +27,13 @@ inline std::string wide_to_utf8(const wchar_t* w) {
 	return s;
 }
 
+inline std::wstring utf8_to_wide(const std::string& s) {
+	const int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+	std::wstring w(static_cast<size_t>(n > 0 ? n - 1 : 0), L'\0');
+	MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, w.data(), n);
+	return w;
+}
+
 struct EndpointId {
 	std::string id, enumerator, connected;
 	Bus bus = Bus::Other;

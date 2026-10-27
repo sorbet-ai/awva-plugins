@@ -4,9 +4,10 @@
 // What the default output device offers, asked without opening a stream (no Initialize, no Start:
 // nothing plays, the device isn't taken): its mixer format, the shared periods IAudioClient3 offers,
 // the exclusive periods, and whether it applies its volume in hardware. For the latency figures and
-// awva_app_cli devices.
+// awva_app_cli devices (with every output endpoint, outputs_json()).
 #include <string>
 
+#include "audio.h"
 #include "json.h"
 
 #if defined(_WIN32)
@@ -70,6 +71,14 @@ std::string query_output_json() {
 #else
 	return "{}";
 #endif
+}
+
+std::string outputs_json() {
+	std::string s = "[";
+	for (const OutputDevice& d : make_device_audio()->devices())
+		s += std::string(s.size() > 1 ? "," : "") + "{\"id\":" + jstr(d.id) + ",\"name\":" + jstr(d.name) + ",\"bus\":" + jstr(d.bus) +
+		    ",\"default\":" + (d.is_default ? "true" : "false") + "}";
+	return s + "]";
 }
 
 } // namespace awva_app

@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Audio out on Linux: ALSA's "default" PCM (on a desktop, PulseAudio's or PipeWire's: the system's
-// mixer and volume stay in the path), float stereo at 48 kHz (the plug layer converts when the device
+// mixer and volume stay in the path), or the PCM chosen (one of devices(): the sound servers' PCMs,
+// each card's sysdefault and HDMI outputs, BlueALSA's; one that isn't there plays the default and
+// says so; one that takes no float through the plug layer), float stereo at 48 kHz (the plug layer converts when the device
 // wants otherwise), 128-frame periods, two of them buffered. An underrun is a glitch: counted, noted
 // for the log, and the stream prepared again. Without a device the thread asks for audio in real
 // time, as the null sink does.
@@ -14,23 +16,76 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <vector>
 
 #include "audio.h"
 #include "awva_app/awva_app.h"
+#include "buffer_policy.h"
 #include "platform.h"
 
 namespace awva_app {
 
 namespace {
 
+// a card's driver ("USB-Audio", "HDA-Intel", ...) by the CARD= of a PCM name ("" none)
+std::string card_driver(const std::string& pcm) {
+	const size_t at = pcm.find("CARD=");
+	if (at == std::string::npos) return {};
+	const std::string card = pcm.substr(at + 5, pcm.find(',', at) == std::string::npos ? std::string::npos : pcm.find(',', at) - at - 5);
+	const int k = snd_card_get_index(card.c_str());
+	if (k < 0) return {};
+	snd_ctl_t* ctl = nullptr;
+	std::string d;
+	if (snd_ctl_open(&ctl, ("hw:" + std::to_string(k)).c_str(), 0) == 0) {
+		snd_ctl_card_info_t* info = nullptr;
+		snd_ctl_card_info_malloc(&info);
+		if (snd_ctl_card_info(ctl, info) == 0) d = snd_ctl_card_info_get_driver(info);
+		snd_ctl_card_info_free(info);
+		snd_ctl_close(ctl);
+	}
+	return d;
+}
+
+// every output PCM a person would choose: the sound servers' (PipeWire, PulseAudio, JACK), each card's
+// sysdefault and HDMI outputs, BlueALSA's; the bus from the card's driver or the PCM's name
+std::vector<OutputDevice> alsa_outputs() {
+	std::vector<OutputDevice> v;
+	void** hints = nullptr;
+	if (snd_device_name_hint(-1, "pcm", &hints) != 0) return v;
+	for (void** h = hints; *h; h++) {
+		char* n = snd_device_name_get_hint(*h, "NAME");
+		char* d = snd_device_name_get_hint(*h, "DESC");
+		char* io = snd_device_name_get_hint(*h, "IOID");
+		const std::string name = n ? n : "", desc = d ? d : "";
+		const bool output = !io || std::strcmp(io, "Output") == 0;
+		std::free(n);
+		std::free(d);
+		std::free(io);
+		const bool server = name == "pipewire" || name == "pulse" || name == "jack";
+		if (!output || !(server || name.rfind("sysdefault:", 0) == 0 || name.rfind("hdmi:", 0) == 0 || name.rfind("bluealsa", 0) == 0)) continue;
+		std::string label = desc.substr(0, desc.find('
+'));
+		const size_t nl = desc.find('
+');
+		if (nl != std::string::npos && name.rfind("hdmi:", 0) == 0) label += ", " + desc.substr(nl + 1); // (which HDMI output)
+		const std::string driver = card_driver(name);
+		const std::string enumerator = name.rfind("bluealsa", 0) == 0 ? "BLUETOOTH" : (driver == "USB-Audio" ? "USB" : driver);
+		v.push_back({name, label.empty() ? name : label, bus_name(bus_of(enumerator, name)), false});
+	}
+	snd_device_name_free_hint(hints);
+	return v;
+}
+
 class AlsaOut : public AudioOut {
 public:
 	~AlsaOut() override { stop(); }
 	int probe_rate() override { return kRate; } // (asked for exactly: the plug layer converts)
+	std::vector<OutputDevice> devices() override { return alsa_outputs(); }
 
 	bool start(AudioCallback* cb) override {
 		stop();
@@ -72,36 +127,61 @@ private:
 		}
 	}
 
+	// a PCM opened for float stereo at 48 kHz, its period and buffer near those asked; on an error it's
+	// closed (*pcm nullptr)
+	static int open_pcm(snd_pcm_t** pcm, const std::string& name, snd_pcm_uframes_t* period, snd_pcm_uframes_t* buffer) {
+		*period = kPeriod;
+		*buffer = 2 * kPeriod;
+		int err = snd_pcm_open(pcm, name.c_str(), SND_PCM_STREAM_PLAYBACK, 0);
+		if (err != 0) {
+			*pcm = nullptr;
+			return err;
+		}
+		snd_pcm_hw_params_t* hw = nullptr;
+		snd_pcm_hw_params_malloc(&hw);
+		snd_pcm_hw_params_any(*pcm, hw);
+		if ((err = snd_pcm_hw_params_set_access(*pcm, hw, SND_PCM_ACCESS_RW_INTERLEAVED)) == 0 &&
+		    (err = snd_pcm_hw_params_set_format(*pcm, hw, SND_PCM_FORMAT_FLOAT_LE)) == 0 && (err = snd_pcm_hw_params_set_channels(*pcm, hw, 2)) == 0 &&
+		    (err = snd_pcm_hw_params_set_rate(*pcm, hw, kRate, 0)) == 0) {
+			int dir = 0;
+			snd_pcm_hw_params_set_period_size_near(*pcm, hw, period, &dir);
+			snd_pcm_hw_params_set_buffer_size_near(*pcm, hw, buffer);
+			err = snd_pcm_hw_params(*pcm, hw);
+		}
+		snd_pcm_hw_params_free(hw);
+		if (err == 0) err = snd_pcm_prepare(*pcm);
+		if (err != 0) {
+			snd_pcm_close(*pcm);
+			*pcm = nullptr;
+		}
+		return err;
+	}
+
 	void thread(AudioCallback* cb) {
 		// (real-time where the system allows it; else the normal priority)
 		sched_param sp{};
 		sp.sched_priority = std::max(1, sched_get_priority_max(SCHED_FIFO) - 10);
 		(void)pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp);
+		// the chosen PCM, if it's there; else the default
+		OutputDevice out{"default", "default", bus_name(Bus::Other), true};
+		bool missing = !config_.device.empty();
+		for (const OutputDevice& d : config_.device.empty() ? std::vector<OutputDevice>{} : alsa_outputs())
+			if (d.id == config_.device) out = d, missing = false;
 		{
 			std::lock_guard<std::mutex> g(m_);
 			info_ = AudioInfo{};
 			info_.backend = "ALSA";
-			info_.device = "default";
+			info_.device = out.name;
+			info_.endpoint = out.id;
+			info_.bus = out.bus;
+			info_.missing = missing;
 			info_.mode = "shared";
 		}
 		snd_pcm_t* pcm = nullptr;
 		snd_pcm_uframes_t period = kPeriod, buffer = 2 * kPeriod;
-		int err = snd_pcm_open(&pcm, "default", SND_PCM_STREAM_PLAYBACK, 0);
-		if (err == 0) {
-			snd_pcm_hw_params_t* hw = nullptr;
-			snd_pcm_hw_params_malloc(&hw);
-			snd_pcm_hw_params_any(pcm, hw);
-			if ((err = snd_pcm_hw_params_set_access(pcm, hw, SND_PCM_ACCESS_RW_INTERLEAVED)) == 0 &&
-			    (err = snd_pcm_hw_params_set_format(pcm, hw, SND_PCM_FORMAT_FLOAT_LE)) == 0 && (err = snd_pcm_hw_params_set_channels(pcm, hw, 2)) == 0 &&
-			    (err = snd_pcm_hw_params_set_rate(pcm, hw, kRate, 0)) == 0) {
-				int dir = 0;
-				snd_pcm_hw_params_set_period_size_near(pcm, hw, &period, &dir);
-				snd_pcm_hw_params_set_buffer_size_near(pcm, hw, &buffer);
-				err = snd_pcm_hw_params(pcm, hw);
-			}
-			snd_pcm_hw_params_free(hw);
-			if (err == 0) err = snd_pcm_prepare(pcm);
-		}
+		int err = open_pcm(&pcm, out.id, &period, &buffer);
+		if (err != 0 && out.id != "default") // (a PCM that takes no float stereo at 48 kHz: through the plug layer)
+			err = open_pcm(&pcm, "plug:'" + out.id + "'", &period, &buffer);
 		{
 			std::lock_guard<std::mutex> g(m_);
 			info_.rate = kRate;

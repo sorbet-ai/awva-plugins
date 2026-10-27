@@ -29,7 +29,7 @@ same design is what the plugins show in a DAW, drawn natively (`DESIGN.md`).
     component's own decoding (awva's `midi_in.h`), as in the plugins. A new engine is given the
     controller's MPE Configuration Message and bend range again.
 - **Audio out:** Windows: WASAPI in shared mode by default (the Windows mixer and volume stay in
-  the path), one device period queued; following the default output. Exclusive mode on request
+  the path), one device period queued; on the default output or the one chosen. Exclusive mode on request
   (Settings > audio output): the device to awva alone, its smallest buffer (or 256, 512 frames), the
   first format it takes; awva then applies the Windows volume itself (the endpoint's level and mute,
   ramped, as the mixer would; left to the device where it does it in hardware), and a device whose
@@ -38,12 +38,18 @@ same design is what the plugins show in a DAW, drawn natively (`DESIGN.md`).
   so its buffer starts at the device's default period, doubles on its glitches (2 in 30 s), and past
   twice that period it plays shared, the reason in the footer; what it learned is kept for the next
   start ("Try exclusive again" measures it again). Wired and USB outputs play the buffer chosen.
-  macOS: CoreAudio's default output, a 128-frame buffer.
+  macOS: CoreAudio, a 128-frame buffer. Linux: ALSA (the sound server's PCM by default).
+- **The output:** Settings > audio output lists System default and every output device (each
+  marked Bluetooth, USB or wired: on Windows by its bus driver, on macOS by its transport type, on
+  Linux by its card's driver). The choice is kept in this computer's settings; shared or exclusive
+  and the buffer apply to it. Switching opens the stream again as at the start (faded in, at -12 dB
+  at most). A saved output that isn't there plays the default, and a line says so; on Windows and
+  macOS it plays again when it comes back.
 - **The delay, key to sound:** shown part by part (Settings; the total in the footer), each figure
   measured or as the driver reports it: MIDI in to output (measured, min/mean/max: a message plays
   from the next buffer rendered, under one period from its arrival), the engine's 2 ms step and
   32-frame block, the output queued, the device's own latency. `awva_app_cli devices` asks the
-  default output what periods it offers, without opening a stream.
+  default output what periods it offers and lists every output, without opening a stream.
 
 ## Safety
 

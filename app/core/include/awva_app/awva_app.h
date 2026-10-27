@@ -10,7 +10,8 @@
  *             integer frames, 32-frame blocks, at unity (awva's output is nominal +-1), subnormals flushed
  *   MIDI in   every input port, MIDI 1.0 and MPE as MIDI 1.0 in UMP (the component up-converts),
  *             MIDI 2.0 UMP where the OS gives it (CoreMIDI)
- *   audio out WASAPI shared mode (Windows), CoreAudio (macOS), or a null sink (no_audio)
+ *   audio out WASAPI (Windows), CoreAudio (macOS), ALSA (Linux): the system's default output or the
+ *             one chosen; or a null sink (no_audio)
  *   safety    the master level (it starts at most at -12 dB and fades in), a true-peak limiter at
  *             -1 dBTP with a 1.4 ms look-ahead, a guard against non-finite samples, a hard ceiling
  *
@@ -72,6 +73,8 @@ AWVA_APP_API int32_t awva_abi(void);
  *                             ("bluetooth", "usb", "other"), exclusive on request, periods 3 and
  *                             10 ms; "simulate_wake_ms": its least time between wake-ups (tests: a
  *                             Bluetooth endpoint's buffer raised on its late wake-ups)
+ *   "simulate_devices": [{"id","name","bus"}...]  with no_audio: a fake output list (the first the
+ *                             default); the one chosen plays as the fake endpoint, on its bus
  *   "midi": false             no MIDI ports opened
  * Returns 0, or -1 if it was started already. */
 AWVA_APP_API int32_t awva_start(const char* options_json);
@@ -112,7 +115,9 @@ AWVA_APP_API void awva_ump(const uint32_t* words, int32_t count);
 AWVA_APP_API void awva_midi1(const uint8_t* bytes, int32_t count);
 
 /* audio: {"backend","device","state","message","rate","buffer","mode","wanted","frames",
- * "exclusive_available","volume","bus","learned"}: mode is what plays ("shared", "exclusive",
+ * "exclusive_available","volume","bus","learned","chosen","missing","notice"}: chosen the output
+ * asked for ("" the system's default), missing true when it isn't there (the default plays; notice
+ * the line that says so); mode is what plays ("shared", "exclusive",
  * "null"), wanted what was asked for (an exclusive request the device refused plays shared, message
  * says why); bus the endpoint's ("bluetooth", "usb", "other"); learned the exclusive buffer a
  * Bluetooth endpoint sustains (frames; -1 shared only; 0 none), raised on its glitches and kept for
@@ -124,8 +129,14 @@ AWVA_APP_API int32_t awva_audio_restart(void);
  * keeps it); restarts the
  * audio, faded in. Kept for the next start. */
 AWVA_APP_API int32_t awva_set_audio_mode(const char* mode, int32_t frames);
-/* the delay from a key to the output, part by part, each with its source ("measured", "reported by
- * the driver"): {"mode","rate","period_frames","period_ms","buffer_frames","buffer_ms","stream_ms",
+/* every output endpoint, read without opening one: [{"id","name","bus","default"}...] (bus:
+ * "bluetooth", "usb", "other") */
+AWVA_APP_API const char* awva_audio_devices(void);
+/* the output: an id awva_audio_devices() lists, or "" the system's default; restarts the audio on
+ * it, faded in at -12 dB at most, as at the start; shared or exclusive and the buffer apply to it.
+ * Kept for the next start. 0, or -1 (no such output) */
+AWVA_APP_API int32_t awva_set_audio_device(const char* id);
+/* the delay from a key to the output, part by part: {"mode","rate","period_frames","period_ms","buffer_frames","buffer_ms","stream_ms",
  * "block_frames","block_ms","step_ms","midi_count","midi_min_ms","midi_mean_ms","midi_max_ms",
  * "total_ms",...}; the MIDI figures over the messages since the last call */
 AWVA_APP_API const char* awva_latency(void);

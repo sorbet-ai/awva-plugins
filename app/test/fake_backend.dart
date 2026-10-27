@@ -93,7 +93,25 @@ class FakeBackend implements AwvaBackend {
   AudioInfo audio() => AudioInfo({
         'backend': 'WASAPI', 'device': device, 'state': 'running', 'message': audioMessage, 'rate': 48000, 'buffer': buffer, 'mode': plays ?? mode,
         'wanted': mode, 'frames': 256, 'exclusive_available': true, 'volume': (plays ?? mode) == 'exclusive' ? 0.3 : -1, 'bus': bus, 'learned': learned,
+        'chosen': chosen, 'missing': notice.isNotEmpty, 'notice': notice,
       });
+  // the outputs; chosen: the one asked for ('' the system's default); notice: the chosen one is missing
+  String chosen = '', notice = '';
+  final outputs = [
+    OutputDeviceInfo({'id': 'spk', 'name': 'Speakers', 'bus': 'other', 'default': true}),
+    OutputDeviceInfo({'id': 'dac', 'name': 'USB DAC', 'bus': 'usb', 'default': false}),
+    OutputDeviceInfo({'id': 'buds', 'name': 'Buds', 'bus': 'bluetooth', 'default': false}),
+  ];
+  @override
+  List<OutputDeviceInfo> audioDevices() => outputs;
+  @override
+  bool setAudioDevice(String id) {
+    calls.add('output $id');
+    chosen = id;
+    device = outputs.firstWhere((d) => d.id == id, orElse: () => outputs.first).name;
+    return true;
+  }
+
   // the output: a device on a bus; plays: what plays when it isn't what was asked for
   String device = 'Speakers', bus = 'other', audioMessage = '';
   String? plays;
@@ -112,7 +130,7 @@ class FakeBackend implements AwvaBackend {
   LatencyInfo latency() => LatencyInfo({
         'mode': mode, 'rate': 48000, 'period_frames': 144, 'period_ms': 3.0, 'buffer_frames': 144, 'buffer_ms': 3.0, 'stream_ms': 4.2,
         'block_frames': 32, 'block_ms': 0.67, 'step_ms': 2.0, 'midi_count': 412, 'midi_min_ms': 2.1, 'midi_mean_ms': 3.0, 'midi_max_ms': 3.9,
-        'total_ms': 10.2, 'total_source': 'measured MIDI + reported output', 'glitches': 0, 'recoveries': 0,
+        'total_ms': 10.2, 'glitches': 0, 'recoveries': 0,
       });
   @override
   String setting(String key) => settings[key] ?? '';

@@ -189,7 +189,7 @@ class _Header extends StatelessWidget {
     }
     final packages = k.engines.where((e) => !e.builtin).toList();
     items.add(const MenuItem(title: 'your engines', heading: true));
-    if (packages.isEmpty) items.add(MenuItem(title: 'None yet', detail: 'Add packages to ${k.enginesDir}', enabled: false));
+    if (packages.isEmpty) items.add(const MenuItem(title: 'None yet', enabled: false));
     for (final e in packages) {
       items.add(MenuItem(
         title: e.label,
@@ -497,9 +497,9 @@ class _Footer extends StatelessWidget {
             Text('CPU ${(st.cpu * 100).round()}%', style: AwvaType.small(c.text3)),
             if (st.reductionDb > 0.5) ...[const SizedBox(width: AwvaSize.s4), Text('limiter −${st.reductionDb.toStringAsFixed(1)} dB', style: AwvaType.small(c.butter))],
             if (k.note != null) ...[const SizedBox(width: AwvaSize.s4), Text(k.note!, style: AwvaType.small(c.butter))],
-            if (fallback) ...[
+            if (fallback || a.notice.isNotEmpty) ...[
               const SizedBox(width: AwvaSize.s4),
-              Flexible(child: Text(a.message, maxLines: 1, overflow: TextOverflow.ellipsis, style: AwvaType.small(c.butter))),
+              Flexible(child: Text(a.notice.isNotEmpty ? a.notice : a.message, maxLines: 1, overflow: TextOverflow.ellipsis, style: AwvaType.small(c.butter))),
             ],
             const Spacer(),
             Flexible(
@@ -552,13 +552,28 @@ class _Settings extends StatelessWidget {
             ],
           ]),
           head('audio output'),
+          if (k.devices.isNotEmpty) ...[
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Builder(
+                builder: (anchor) => _Segment(
+                  label: k.devices.where((d) => d.id == a.chosen).map((d) => d.name).firstOrNull ?? 'System default',
+                  selected: false,
+                  trailing: Icons.chevronDown,
+                  onTap: () => _outputMenu(anchor),
+                ),
+              ),
+            ),
+            const SizedBox(height: AwvaSize.s2),
+          ],
           Text(a.device.isEmpty ? (a.state == 'null' ? 'None (--no-audio)' : 'No device') : a.device, style: AwvaType.body(c.text1)),
           Text(
             a.state == 'running'
-                ? '${a.backend} ${a.mode} · ${a.rate} Hz. ${a.mode == 'exclusive' ? 'The Windows volume is applied by awva (now ${(a.volume * 100).round()}%).' : 'Follows the system volume.'}'
+                ? '${_bus(a.bus)} · ${a.backend} ${a.mode} · ${a.rate} Hz${a.mode == 'exclusive' && a.volume >= 0 ? ' · volume ${(a.volume * 100).round()}%' : ''}'
                 : (a.message.isEmpty ? a.backend : a.message),
             style: AwvaType.small(a.state == 'failed' ? c.error : c.text3),
           ),
+          if (a.notice.isNotEmpty) Text(a.notice, style: AwvaType.small(c.butter)),
           if (a.state == 'running' && a.message.isNotEmpty) Text(a.message, style: AwvaType.small(c.butter)),
           if (a.exclusiveAvailable) ...[
             const SizedBox(height: AwvaSize.s2),
@@ -571,7 +586,7 @@ class _Settings extends StatelessWidget {
               // (a Bluetooth output: no buffer offered it can't sustain; the app raises it on glitches)
               const SizedBox(height: AwvaSize.s2),
               if (a.mode == 'exclusive')
-                Text('buffer ${a.buffer} frames, set for Bluetooth: raised when it glitches', style: AwvaType.small(c.text3))
+                Text('buffer ${a.buffer} frames', style: AwvaType.small(c.text3))
               else
                 AwvaButton(onTap: () => k.setAudioMode('exclusive'), icon: Icons.refresh, label: 'Try exclusive again'),
             ] else if (a.wanted == 'exclusive') ...[
@@ -586,28 +601,13 @@ class _Settings extends StatelessWidget {
                 ],
               ]),
             ],
-            if (k.exclusiveNote)
-              Container(
-                margin: const EdgeInsets.only(top: AwvaSize.s2),
-                padding: const EdgeInsets.all(AwvaSize.s3),
-                decoration: BoxDecoration(color: c.butter.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(AwvaSize.radiusSmall)),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(
-                    'Exclusive mode gives awva the output alone: other apps go quiet, and the Windows mixer is bypassed. '
-                    'awva applies the Windows volume itself. Check the level before you play loud.',
-                    style: AwvaType.small(c.text1),
-                  ),
-                  const SizedBox(height: AwvaSize.s2),
-                  AwvaButton(onTap: k.noteExclusiveRead, label: 'Got it'),
-                ]),
-              ),
           ],
           const SizedBox(height: AwvaSize.s2),
           AwvaButton(onTap: k.restartAudio, icon: Icons.refresh, label: 'Restart audio'),
           head('delay, key to sound'),
-          _LatencyTable(l: k.latency, mode: a.mode),
+          _LatencyTable(l: k.latency),
           head('midi inputs'),
-          if (k.ports.isEmpty) Text('No MIDI inputs. Connect a controller; it shows here.', style: AwvaType.small(c.text3)),
+          if (k.ports.isEmpty) Text('No MIDI inputs', style: AwvaType.small(c.text3)),
           for (final p in k.ports)
             Padding(
               padding: const EdgeInsets.only(bottom: AwvaSize.s2),
@@ -623,20 +623,13 @@ class _Settings extends StatelessWidget {
             ),
           head('play'),
           Row(children: [
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Mono', style: AwvaType.body(c.text1)),
-                Text('one note at a time; slurs or re-tongues by how you play', style: AwvaType.small(c.text3)),
-              ]),
-            ),
+            Expanded(child: Text('Mono', style: AwvaType.body(c.text1))),
             AwvaSwitch(value: k.sound?.mono ?? false, onChanged: k.setMono),
           ]),
           const SizedBox(height: AwvaSize.s2),
           AwvaButton(onTap: k.panic, icon: Icons.stop, label: 'All notes off'),
           head('your engines'),
           Text(k.enginesDir, style: AwvaType.small(c.text2)),
-          const SizedBox(height: AwvaSize.s1),
-          Text('Engine packages (.awvapkg files) here are listed by themselves; see the README.', style: AwvaType.small(c.text3)),
           const SizedBox(height: AwvaSize.s2),
           AwvaButton(onTap: k.rescan, icon: Icons.refresh, label: 'Rescan'),
           for (final e in packages)
@@ -659,46 +652,55 @@ class _Settings extends StatelessWidget {
       ),
     );
   }
+
+  /// the outputs, read again: the system's default, then every endpoint with its bus
+  void _outputMenu(BuildContext anchor) {
+    k.refreshDevices();
+    final chosen = k.audio.chosen;
+    showMenuAt(anchor, [
+      MenuItem(title: 'System default', selected: chosen.isEmpty, onTap: () => k.setAudioDevice('')),
+      for (final d in k.devices) MenuItem(title: d.name, trailing: _bus(d.bus), selected: d.id == chosen, onTap: () => k.setAudioDevice(d.id)),
+    ], width: 340);
+  }
 }
 
-/// the delay chain, each figure with where it comes from
+/// the delay chain, figure by figure
 class _LatencyTable extends StatelessWidget {
-  const _LatencyTable({required this.l, required this.mode});
+  const _LatencyTable({required this.l});
   final LatencyInfo l;
-  final String mode;
   @override
   Widget build(BuildContext context) {
     final c = AwvaTheme.of(context);
     String ms(double v) => '${v.toStringAsFixed(1)} ms';
-    Widget row(String what, String value, String source, {bool strong = false}) => Padding(
+    Widget row(String what, String value, {bool strong = false}) => Padding(
           padding: const EdgeInsets.only(bottom: 2),
           child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Expanded(child: Text(what, style: (strong ? AwvaType.bodyStrong : AwvaType.small)(strong ? c.text1 : c.text2))),
-            SizedBox(width: 116, child: Text(value, textAlign: TextAlign.right, style: AwvaType.value(strong ? c.text1 : c.text2))),
-            const SizedBox(width: AwvaSize.s3),
-            SizedBox(width: 62, child: Text(source, style: AwvaType.small(c.text3))),
+            Text(value, textAlign: TextAlign.right, style: AwvaType.value(strong ? c.text1 : c.text2)),
           ]),
         );
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      row('MIDI in to output', l.midiCount > 0 ? '${ms(l.midiMean)} (${l.midiMin.toStringAsFixed(1)}–${l.midiMax.toStringAsFixed(1)})' : 'play a note',
-          l.midiCount > 0 ? 'measured' : ''),
-      row('engine step', 'up to ${ms(l.stepMs)}', 'by design'),
-      row('engine block', '${l.blockFrames} fr · ${ms(l.blockMs)}', 'by design'),
-      row('output buffer', '${l.bufferFrames} fr · ${ms(l.bufferMs)}', 'driver'),
-      row('device latency', l.streamMs >= 0 ? ms(l.streamMs) : 'not reported', 'driver'),
-      row('key to sound', ms(l.totalMs), 'sum', strong: true),
+      row('MIDI in to output', l.midiCount > 0 ? '${ms(l.midiMean)} (${l.midiMin.toStringAsFixed(1)}–${l.midiMax.toStringAsFixed(1)})' : '–'),
+      row('engine step', 'up to ${ms(l.stepMs)}'),
+      row('engine block', '${l.blockFrames} fr · ${ms(l.blockMs)}'),
+      row('output buffer', '${l.bufferFrames} fr · ${ms(l.bufferMs)}'),
+      row('device latency', l.streamMs >= 0 ? ms(l.streamMs) : '–'),
+      row('key to sound', ms(l.totalMs), strong: true),
       const SizedBox(height: AwvaSize.s2),
-      row('glitches', l.recoveries > 0 ? '${l.glitches} · re-opened ${l.recoveries}×' : '${l.glitches}', 'measured'),
-      if (l.glitches > 0) Text('If they keep coming, a larger buffer helps (exclusive: 256 or 512).', style: AwvaType.small(c.text3)),
+      row('glitches', l.recoveries > 0 ? '${l.glitches} · re-opened ${l.recoveries}×' : '${l.glitches}'),
     ]);
   }
 }
 
+/// a bus as the output list names it
+String _bus(String bus) => switch (bus) { 'bluetooth' => 'Bluetooth', 'usb' => 'USB', _ => 'wired' };
+
 class _Segment extends StatelessWidget {
-  const _Segment({required this.label, required this.selected, required this.onTap});
+  const _Segment({required this.label, required this.selected, required this.onTap, this.trailing});
   final String label;
   final bool selected;
   final VoidCallback onTap;
+  final IconPainter? trailing;
   @override
   Widget build(BuildContext context) {
     final c = AwvaTheme.of(context);
@@ -710,9 +712,15 @@ class _Segment extends StatelessWidget {
           duration: AwvaSize.quick,
           height: 30,
           padding: const EdgeInsets.symmetric(horizontal: 12),
-          alignment: Alignment.center,
+          alignment: trailing == null ? Alignment.center : null,
           decoration: BoxDecoration(color: selected ? c.bg3 : c.bg2, borderRadius: BorderRadius.circular(AwvaSize.radiusSmall)),
-          child: Text(label, style: AwvaType.bodyStrong(selected ? c.text1 : c.text2)),
+          child: trailing == null
+              ? Text(label, style: AwvaType.bodyStrong(selected ? c.text1 : c.text2))
+              : Row(mainAxisSize: MainAxisSize.min, children: [
+                  Flexible(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: AwvaType.bodyStrong(c.text1))),
+                  const SizedBox(width: 4),
+                  AwvaIcon(trailing!, color: c.text3),
+                ]),
         ),
       ),
     );

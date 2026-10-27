@@ -21,6 +21,13 @@ String formatValue(double v, double min, double max, int kind) {
   return v.toStringAsFixed(2);
 }
 
+/// a wheel turn over a control: the control's alone (claimed from the pointer signal resolver, so a
+/// scroll view around it, or the host around the plugin's editor, doesn't scroll too); dy > 0: down
+void claimWheel(PointerSignalEvent e, void Function(double dy) onWheel) {
+  if (e is! PointerScrollEvent) return;
+  GestureBinding.instance.pointerSignalResolver.register(e, (s) => onWheel((s as PointerScrollEvent).scrollDelta.dy));
+}
+
 // --- the knob ------------------------------------------------------------------------------------
 
 /// A value as a ribbon arc (270 degrees, round caps): drag up or down (shift: fine), scroll, double
@@ -70,12 +77,7 @@ class _KnobState extends State<Knob> {
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
       child: Listener(
-        onPointerSignal: (e) {
-          if (e is PointerScrollEvent) {
-            final step = widget.kind != 0 ? 1.0 : _span / 100;
-            _set(widget.value - e.scrollDelta.dy.sign * step);
-          }
-        },
+        onPointerSignal: (e) => claimWheel(e, (dy) => _set(widget.value - dy.sign * (widget.kind != 0 ? 1.0 : _span / 100))),
         child: GestureDetector(
           onDoubleTap: () => _set(widget.def),
           onVerticalDragStart: (_) => setState(() {
@@ -169,9 +171,7 @@ class LevelControl extends StatelessWidget {
       MouseRegion(
         cursor: SystemMouseCursors.resizeLeftRight,
         child: Listener(
-          onPointerSignal: (e) {
-            if (e is PointerScrollEvent) onChanged((db - e.scrollDelta.dy.sign).clamp(minDb, maxDb));
-          },
+          onPointerSignal: (e) => claimWheel(e, (dy) => onChanged((db - dy.sign).clamp(minDb, maxDb))),
           child: GestureDetector(
             onDoubleTap: () => onChanged(-18),
             onHorizontalDragUpdate: (d) => at(d.localPosition.dx),

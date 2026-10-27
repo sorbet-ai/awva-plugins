@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Sorbet AI
 // SPDX-License-Identifier: Apache-2.0
 //
-// WASAPI on the default render device, event driven.
+// WASAPI on the default render device, or the one chosen (its endpoint id; one that isn't there, or
+// isn't active, plays the default and says so), event driven.
 //   shared (the default): the Windows mixer's rate and format (float); the mixer and the Windows
 //     volume stay in the path. IAudioClient3's smallest shared period of at least 128 frames, else
 //     the default period.
@@ -57,11 +58,11 @@ const IID kIEndpointVolume = {0x5cdf2c82, 0x841e, 0x4546, {0x97, 0x22, 0x0c, 0xf
 const GUID kFloat = {0x00000003, 0x0000, 0x0010, {0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}};
 const GUID kPcm = {0x00000001, 0x0000, 0x0010, {0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}};
 
-// the default output changing (headphones plugged in, the user's choice): a flag, read by the UI
-// thread, which restarts the audio on the new default
+// the default output changing (headphones plugged in, the user's choice), or an output coming or
+// going: flags, read by the UI thread, which restarts the audio on the new default or the chosen one
 class DefaultWatch final : public IMMNotificationClient {
 public:
-	DefaultWatch(std::atomic<bool>* flag, std::atomic<bool>* reopen) : flag_(flag), reopen_(reopen) {}
+	DefaultWatch(std::atomic<bool>* flag, std::atomic<bool>* reopen, std::atomic<bool>* devices) : flag_(flag), reopen_(reopen), devices_(devices) {}
 	HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** out) override {
 		if (iid == __uuidof(IUnknown) || iid == __uuidof(IMMNotificationClient)) {
 			*out = static_cast<IMMNotificationClient*>(this);
@@ -81,9 +82,18 @@ public:
 		if (flow == eRender && role == eConsole) flag_->store(true);
 		return S_OK;
 	}
-	HRESULT STDMETHODCALLTYPE OnDeviceStateChanged(LPCWSTR, DWORD) override { return S_OK; }
-	HRESULT STDMETHODCALLTYPE OnDeviceAdded(LPCWSTR) override { return S_OK; }
-	HRESULT STDMETHODCALLTYPE OnDeviceRemoved(LPCWSTR) override { return S_OK; }
+	HRESULT STDMETHODCALLTYPE OnDeviceStateChanged(LPCWSTR, DWORD) override {
+		devices_->store(true);
+		return S_OK;
+	}
+	HRESULT STDMETHODCALLTYPE OnDeviceAdded(LPCWSTR) override {
+		devices_->store(true);
+		return S_OK;
+	}
+	HRESULT STDMETHODCALLTYPE OnDeviceRemoved(LPCWSTR) override {
+		devices_->store(true);
+		return S_OK;
+	}
 	HRESULT STDMETHODCALLTYPE OnPropertyValueChanged(LPCWSTR, const PROPERTYKEY key) override {
 		// PKEY_AudioEngine_DeviceFormat: a device's format changed (the stream is opened again on it)
 		static const GUID kFormat = {0xf19f064d, 0x082c, 0x4e27, {0xbc, 0x73, 0x68, 0x82, 0xa1, 0xbb, 0x8e, 0x4c}};
@@ -94,6 +104,7 @@ public:
 private:
 	std::atomic<bool>* flag_;
 	std::atomic<bool>* reopen_;
+	std::atomic<bool>* devices_;
 	std::atomic<ULONG> ref_{1};
 };
 
@@ -152,6 +163,35 @@ private:
 	EndpointGain* gain_ = nullptr;
 	bool registered_ = false;
 };
+
+// the endpoint's friendly name ("" unreadable)
+std::string friendly_name(IMMDevice* dev) {
+	std::string n;
+	IPropertyStore* ps = nullptr;
+	if (SUCCEEDED(dev->OpenPropertyStore(STGM_READ, &ps))) {
+		PROPVARIANT v;
+		PropVariantInit(&v);
+		if (SUCCEEDED(ps->GetValue(kFriendlyName, &v)) && v.vt == VT_LPWSTR) n = wide_to_utf8(v.pwszVal);
+		PropVariantClear(&v);
+		ps->Release();
+	}
+	return n;
+}
+
+// the output to open: the chosen one (an active endpoint by its id), else the default (missing: the
+// chosen one isn't there); nullptr: no output at all
+IMMDevice* find_output(IMMDeviceEnumerator* en, const std::string& id, bool* missing) {
+	IMMDevice* dev = nullptr;
+	*missing = false;
+	if (!id.empty()) {
+		DWORD state = 0;
+		if (SUCCEEDED(en->GetDevice(utf8_to_wide(id).c_str(), &dev)) && dev && SUCCEEDED(dev->GetState(&state)) && state == DEVICE_STATE_ACTIVE) return dev;
+		release(dev);
+		*missing = true;
+	}
+	if (FAILED(en->GetDefaultAudioEndpoint(eRender, eConsole, &dev))) dev = nullptr;
+	return dev;
+}
 
 // a format as a WAVEFORMATEXTENSIBLE: float32, or integer of bits in a container of bytes
 WAVEFORMATEXTENSIBLE make_format(int rate, int channels, DWORD mask, bool fl, int bits, int container) {
@@ -216,7 +256,7 @@ public:
 	Wasapi() {
 		// (the caller's thread: the UI's, COM ready; notifications come on the system's own thread)
 		if (SUCCEEDED(CoCreateInstance(kEnumerator, nullptr, CLSCTX_ALL, kIEnumerator, reinterpret_cast<void**>(&watch_en_)))) {
-			watch_ = new DefaultWatch(&changed_, &reopen_);
+			watch_ = new DefaultWatch(&changed_, &reopen_, &devices_changed_);
 			if (FAILED(watch_en_->RegisterEndpointNotificationCallback(watch_))) release(watch_);
 		}
 	}
@@ -227,6 +267,31 @@ public:
 		release(watch_en_);
 	}
 	bool take_default_changed() override { return changed_.exchange(false); }
+	bool take_devices_changed() override { return devices_changed_.exchange(false); }
+
+	std::vector<OutputDevice> devices() override {
+		CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+		std::vector<OutputDevice> v;
+		IMMDeviceEnumerator* en = nullptr;
+		IMMDeviceCollection* all = nullptr;
+		IMMDevice* def = nullptr;
+		if (FAILED(CoCreateInstance(kEnumerator, nullptr, CLSCTX_ALL, kIEnumerator, reinterpret_cast<void**>(&en)))) return v;
+		std::string def_id;
+		if (SUCCEEDED(en->GetDefaultAudioEndpoint(eRender, eConsole, &def))) def_id = endpoint_id(def).id;
+		release(def);
+		UINT n = 0;
+		if (SUCCEEDED(en->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &all)) && SUCCEEDED(all->GetCount(&n)))
+			for (UINT k = 0; k < n; k++) {
+				IMMDevice* dev = nullptr;
+				if (FAILED(all->Item(k, &dev)) || !dev) continue;
+				const EndpointId id = endpoint_id(dev);
+				v.push_back({id.id, friendly_name(dev), bus_name(id.bus), id.id == def_id});
+				release(dev);
+			}
+		release(all);
+		release(en);
+		return v;
+	}
 
 	// the rate the stream will have: the mixer's (shared), or the exclusive format's
 	int probe_rate() override {
@@ -236,8 +301,9 @@ public:
 		IMMDevice* dev = nullptr;
 		IAudioClient* ac = nullptr;
 		WAVEFORMATEX* mix = nullptr;
+		bool missing = false;
 		if (SUCCEEDED(CoCreateInstance(kEnumerator, nullptr, CLSCTX_ALL, kIEnumerator, reinterpret_cast<void**>(&en))) &&
-		    SUCCEEDED(en->GetDefaultAudioEndpoint(eRender, eConsole, &dev)) &&
+		    (dev = find_output(en, config_.device, &missing)) != nullptr &&
 		    SUCCEEDED(dev->Activate(kIAudioClient, CLSCTX_ALL, nullptr, reinterpret_cast<void**>(&ac))) && SUCCEEDED(ac->GetMixFormat(&mix))) {
 			rate = static_cast<int>(mix->nSamplesPerSec);
 			WAVEFORMATEXTENSIBLE f;
@@ -439,20 +505,22 @@ private:
 			info_.exclusive_available = true;
 			info_.device = device;
 		}
+		bool missing = false;
 		HRESULT hr = CoCreateInstance(kEnumerator, nullptr, CLSCTX_ALL, kIEnumerator, reinterpret_cast<void**>(&en));
-		if (SUCCEEDED(hr)) hr = en->GetDefaultAudioEndpoint(eRender, eConsole, &dev);
+		if (SUCCEEDED(hr)) {
+			dev = find_output(en, config_.device, &missing);
+			if (!dev) hr = E_FAIL;
+		}
+		{
+			std::lock_guard<std::mutex> g(m_);
+			info_.missing = missing;
+		}
 		if (FAILED(hr)) why = "no audio output device";
 		if (SUCCEEDED(hr)) {
-			IPropertyStore* ps = nullptr;
-			if (SUCCEEDED(dev->OpenPropertyStore(STGM_READ, &ps))) {
-				PROPVARIANT v;
-				PropVariantInit(&v);
-				if (SUCCEEDED(ps->GetValue(kFriendlyName, &v)) && v.vt == VT_LPWSTR) {
-					std::lock_guard<std::mutex> g(m_);
-					info_.device = wide_to_utf8(v.pwszVal);
-				}
-				PropVariantClear(&v);
-				ps->Release();
+			const std::string name = friendly_name(dev);
+			if (!name.empty()) {
+				std::lock_guard<std::mutex> g(m_);
+				info_.device = name;
 			}
 			const EndpointId id = endpoint_id(dev);
 			const auto learned = config_.learned.find(id.id);
@@ -497,7 +565,7 @@ private:
 		const bool have_lat = SUCCEEDED(hr) && SUCCEEDED(ac->GetStreamLatency(&lat));
 		const int rate = SUCCEEDED(hr) ? static_cast<int>(fmt.Format.nSamplesPerSec) : (mix ? static_cast<int>(mix->nSamplesPerSec) : 48000);
 		if (exclusive) period = frames;
-		if (SUCCEEDED(hr) && note.empty()) note = policy_.note(config_.exclusive, static_cast<int>(frames));
+		if (SUCCEEDED(hr) && note.empty()) note = policy_.note(config_.exclusive);
 		if (!exclusive && period == 0 && SUCCEEDED(hr)) { // (no IAudioClient3 period: the engine's own)
 			REFERENCE_TIME def = 0, mn = 0;
 			if (SUCCEEDED(ac->GetDevicePeriod(&def, &mn))) period = static_cast<UINT32>(std::llround(def / 1e7 * fmt.Format.nSamplesPerSec));
@@ -602,7 +670,7 @@ private:
 	AudioInfo info_;
 	EndpointGain gain_;
 	EndpointBuffer policy_; // (the audio thread's, between start and stop)
-	std::atomic<bool> run_{false}, opened_{false}, changed_{false}, reopen_{false};
+	std::atomic<bool> run_{false}, opened_{false}, changed_{false}, reopen_{false}, devices_changed_{false};
 	// the glitches: counted, and noted in a ring the UI thread logs from (audio thread: writer)
 	static constexpr size_t kGlitchRing = 64;
 	Glitch gring_[kGlitchRing];

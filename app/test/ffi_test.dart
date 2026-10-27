@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // The UI's side of the core, against the real core library (../build/app; AWVA_CORE to point
-// elsewhere): the null sink and no MIDI ports, so it opens no device.
+// elsewhere): the null sink (a fake output list) and no MIDI ports, so it opens no device.
 import 'dart:io';
 
 import 'package:awva/src/core.dart';
@@ -37,6 +37,10 @@ void main() {
       'settings': '',
       'builtin_dir': '${File(_corePath()).parent.path}/engines',
       'engines_dir': none.path,
+      'simulate_devices': [
+        {'id': 'spk', 'name': 'Speakers', 'bus': 'other'},
+        {'id': 'buds', 'name': 'Buds', 'bus': 'bluetooth'},
+      ],
     });
   });
   tearDownAll(() {
@@ -93,6 +97,19 @@ void main() {
     core.ump([0x20813C40]);
     core.setMasterDb(-60);
     expect(core.status().masterDb, -60);
+  });
+
+  test('the outputs listed, one chosen, an unknown one refused', () {
+    final d = core.audioDevices();
+    expect(d.map((x) => x.name), ['Speakers', 'Buds']);
+    expect(d.first.isDefault, isTrue);
+    expect(d.last.bus, 'bluetooth');
+    expect(core.setAudioDevice('buds'), isTrue);
+    expect(core.audio().device, 'Buds');
+    expect(core.audio().chosen, 'buds');
+    expect(core.setAudioDevice('nosuch'), isFalse);
+    expect(core.setAudioDevice(''), isTrue);
+    expect(core.audio().device, 'Speakers');
   });
 
   test('settings round trip', () {

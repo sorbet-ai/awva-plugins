@@ -202,8 +202,8 @@ int main(int argc, char** argv) {
 	if (mode == "smoke") return smoke(argc, argv);
 	if (mode == "render") return render(argc, argv);
 	if (mode == "check") return check(argc, argv);
-	if (mode == "devices") { // (asks the default output what it offers; opens no stream, plays nothing)
-		std::printf("%s\n", query_output_json().c_str());
+	if (mode == "devices") { // (the default output's offer, and every output listed; opens no stream, plays nothing)
+		std::printf("%s\n%s\n", query_output_json().c_str(), outputs_json().c_str());
 		return 0;
 	}
 	std::fprintf(stderr, "usage: awva_app_cli list|check|smoke|render [options] (see the source's header)\n");

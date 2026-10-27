@@ -99,8 +99,16 @@ class AudioInfo {
         exclusiveAvailable = j['exclusive_available'] as bool? ?? false,
         volume = (j['volume'] as num?)?.toDouble() ?? -1,
         bus = j['bus'] as String? ?? 'other',
-        learned = j['learned'] as int? ?? 0;
+        learned = j['learned'] as int? ?? 0,
+        chosen = j['chosen'] as String? ?? '',
+        missing = j['missing'] as bool? ?? false,
+        notice = j['notice'] as String? ?? '';
   final String backend, device, state, message;
+
+  /// the output asked for ('' the system's default); missing: it isn't there, the default plays, and
+  /// notice says so
+  final String chosen, notice;
+  final bool missing;
 
   /// the endpoint's bus ("bluetooth", "usb", "other"), and the exclusive buffer the app learned it
   /// sustains (frames; -1 shared only; 0 none): a Bluetooth endpoint's buffer is the app's choice
@@ -114,6 +122,17 @@ class AudioInfo {
 
   /// exclusive: the Windows volume the app applies (linear); -1 none
   final double volume;
+}
+
+/// an output endpoint (awva_audio_devices): its id, name, bus ("bluetooth", "usb", "other")
+class OutputDeviceInfo {
+  OutputDeviceInfo(Map<String, dynamic> j)
+      : id = j['id'] as String,
+        name = j['name'] as String,
+        bus = j['bus'] as String,
+        isDefault = j['default'] as bool;
+  final String id, name, bus;
+  final bool isDefault;
 }
 
 /// the delay from a key to the output, part by part (awva_latency)
@@ -134,11 +153,10 @@ class LatencyInfo {
         midiMean = _d(j['midi_mean_ms']),
         midiMax = _d(j['midi_max_ms']),
         totalMs = _d(j['total_ms']),
-        totalSource = j['total_source'] as String? ?? '',
         glitches = j['glitches'] as int? ?? 0,
         recoveries = j['recoveries'] as int? ?? 0;
   static double _d(Object? v, [double def = 0]) => (v as num?)?.toDouble() ?? def;
-  final String mode, totalSource;
+  final String mode;
   final int rate, periodFrames, bufferFrames, blockFrames, midiCount;
 
   /// glitches the audio thread saw (late wake-ups, slow renders, stalls) and the streams it opened
@@ -191,6 +209,8 @@ abstract class AwvaBackend {
   AudioInfo audio();
   bool audioRestart();
   bool setAudioMode(String mode, int frames);
+  List<OutputDeviceInfo> audioDevices();
+  bool setAudioDevice(String id);
   LatencyInfo latency();
   String setting(String key);
   void setSetting(String key, String value);
@@ -237,6 +257,8 @@ class FfiBackend implements AwvaBackend {
         _audioRestart = _lib.lookupFunction<Int32 Function(), int Function()>('awva_audio_restart'),
         _setAudioMode = _lib.lookupFunction<Int32 Function(Pointer<Utf8>, Int32), int Function(Pointer<Utf8>, int)>('awva_set_audio_mode'),
         _latency = _lib.lookupFunction<_StrN, _Str>('awva_latency'),
+        _audioDevices = _lib.lookupFunction<_StrN, _Str>('awva_audio_devices'),
+        _setAudioDevice = _lib.lookupFunction<Int32 Function(Pointer<Utf8>), int Function(Pointer<Utf8>)>('awva_set_audio_device'),
         _setting = _lib.lookupFunction<Pointer<Utf8> Function(Pointer<Utf8>), Pointer<Utf8> Function(Pointer<Utf8>)>('awva_setting'),
         _setSetting = _lib.lookupFunction<Void Function(Pointer<Utf8>, Pointer<Utf8>), void Function(Pointer<Utf8>, Pointer<Utf8>)>(
             'awva_set_setting'),
@@ -264,10 +286,10 @@ class FfiBackend implements AwvaBackend {
   }
 
   final DynamicLibrary _lib;
-  final _Str _catalog, _enginesDir, _sound, _midiPorts, _audio, _lastError, _latency;
+  final _Str _catalog, _enginesDir, _sound, _midiPorts, _audio, _lastError, _latency, _audioDevices;
   final int Function(Pointer<Utf8>, int) _setAudioMode;
   final int Function() _rescan, _audioRestart;
-  final int Function(Pointer<Utf8>) _selectEngine;
+  final int Function(Pointer<Utf8>) _selectEngine, _setAudioDevice;
   final int Function(int) _selectPreset;
   final int Function(int, double) _setParam;
   final void Function(int) _setMono;
@@ -355,6 +377,10 @@ class FfiBackend implements AwvaBackend {
   bool audioRestart() => _audioRestart() == 0;
   @override
   bool setAudioMode(String mode, int frames) => _withStr(mode, (p) => _setAudioMode(p, frames)) == 0;
+  @override
+  List<OutputDeviceInfo> audioDevices() => [for (final d in _json(_audioDevices) as List) OutputDeviceInfo(d as Map<String, dynamic>)];
+  @override
+  bool setAudioDevice(String id) => _withStr(id, _setAudioDevice) == 0;
   @override
   LatencyInfo latency() => LatencyInfo(_json(_latency) as Map<String, dynamic>);
   @override

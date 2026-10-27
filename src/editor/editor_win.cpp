@@ -302,8 +302,9 @@ struct View {
 			POINT p = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
 			ScreenToClient(hw, &p);
 			if (v->ed->wheel(v->pts(p.x), v->pts(p.y), GET_WHEEL_DELTA_WPARAM(wp) / 120.0f)) InvalidateRect(hw, nullptr, FALSE);
-			return 0;
+			return 0; // (the editor's alone: not passed on to the host's window)
 		}
+		case WM_MOUSEHWHEEL: return 0; // (nothing scrolls sideways; not passed on to the host either)
 		case WM_SETTINGCHANGE: InvalidateRect(hw, nullptr, FALSE); break;
 		default: break;
 		}

@@ -8,6 +8,7 @@ import 'dart:io';
 import 'package:awva/src/controller.dart';
 import 'package:awva/src/screen.dart';
 import 'package:awva/src/widgets.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -53,6 +54,32 @@ void main() {
     expect(core.calls.where((c) => c.startsWith('param 2 ')), isNotEmpty);
   });
 
+  testWidgets('a wheel turn over a knob turns the knob, not the page', (t) async {
+    final core = await _pump(t, size: const Size(1040, 420)); // (short: the sound scrolls)
+    final page = t.state<ScrollableState>(find.byType(Scrollable).first).position;
+    expect(page.maxScrollExtent, greaterThan(0));
+    final p = TestPointer(1, PointerDeviceKind.mouse);
+    await t.sendEventToBinding(p.hover(t.getCenter(find.byType(Knob).first)));
+    await t.sendEventToBinding(p.scroll(const Offset(0, 60)));
+    await t.pumpAndSettle();
+    expect(core.calls.where((c) => c.startsWith('param 2 ')), isNotEmpty);
+    expect(page.pixels, 0);
+    // (beside the knobs the wheel scrolls the page)
+    await t.sendEventToBinding(p.hover(t.getTopLeft(find.byType(Knob).first) - const Offset(40, 0)));
+    await t.sendEventToBinding(p.scroll(const Offset(0, 60)));
+    await t.pumpAndSettle();
+    expect(page.pixels, greaterThan(0));
+  });
+
+  testWidgets('a wheel turn over the level sets the level', (t) async {
+    final core = await _pump(t);
+    final p = TestPointer(1, PointerDeviceKind.mouse);
+    await t.sendEventToBinding(p.hover(t.getCenter(find.byType(LevelControl))));
+    await t.sendEventToBinding(p.scroll(const Offset(0, -60)));
+    await t.pump();
+    expect(core.calls, contains('master -17'));
+  });
+
   testWidgets('the next preset button selects the next preset', (t) async {
     final core = await _pump(t);
     await t.tap(find.bySemanticsLabel('next preset'));
@@ -83,7 +110,7 @@ void main() {
     expect(core.calls.where((c) => c == 'rescan'), hasLength(2));
   });
 
-  testWidgets('exclusive output: asked of the core, a note the first time, the buffer chosen', (t) async {
+  testWidgets('exclusive output: asked of the core, the buffer chosen', (t) async {
     final core = await _pump(t, size: const Size(1040, 900));
     await t.tap(find.bySemanticsLabel('settings'));
     await t.pumpAndSettle();
@@ -91,11 +118,6 @@ void main() {
     await t.tap(find.text('Exclusive'));
     await t.pumpAndSettle();
     expect(core.calls, contains('audio exclusive -1'));
-    expect(find.textContaining('awva applies the Windows volume itself'), findsOneWidget);
-    await t.tap(find.text('Got it'));
-    await t.pumpAndSettle();
-    expect(find.textContaining('awva applies the Windows volume itself'), findsNothing);
-    expect(core.settings['exclusive_noted'], 'yes');
     await t.tap(find.text('256'));
     expect(core.calls, contains('audio exclusive 256'));
   });
@@ -108,11 +130,10 @@ void main() {
           ..bus = 'bluetooth'
           ..mode = 'exclusive'
           ..buffer = 960
-          ..learned = 960
-          ..audioMessage = 'Bluetooth output: the buffer raised to 960 frames after glitches');
+          ..learned = 960);
     await t.tap(find.bySemanticsLabel('settings'));
     await t.pumpAndSettle();
-    expect(find.text('buffer 960 frames, set for Bluetooth: raised when it glitches'), findsOneWidget);
+    expect(find.text('buffer 960 frames'), findsOneWidget);
     expect(find.text('256'), findsNothing);
     expect(find.text('smallest'), findsNothing);
     core
@@ -125,6 +146,25 @@ void main() {
     expect(find.text('Bluetooth output: exclusive mode glitched up to 960 frames, playing shared'), findsNWidgets(2)); // (the footer and settings)
     await t.tap(find.text('Try exclusive again'));
     expect(core.calls, contains('audio exclusive -1'));
+  });
+
+  testWidgets('the output: the system default or a device, each with its bus; a missing one says so', (t) async {
+    final core = await _pump(t, size: const Size(1040, 900));
+    await t.tap(find.bySemanticsLabel('settings'));
+    await t.pumpAndSettle();
+    await t.tap(find.text('System default'));
+    await t.pumpAndSettle();
+    expect(find.text('USB'), findsOneWidget);
+    expect(find.text('Bluetooth'), findsOneWidget);
+    expect(find.text('wired'), findsOneWidget);
+    await t.tap(find.text('USB DAC'));
+    await t.pumpAndSettle();
+    expect(core.calls, contains('output dac'));
+    expect(find.text('USB DAC'), findsNWidgets(2)); // (the picker, and the device playing)
+    core.notice = "Buds isn't connected: playing the default";
+    await t.tap(find.text('Restart audio')); // (the state read again)
+    await t.pumpAndSettle();
+    expect(find.text("Buds isn't connected: playing the default"), findsNWidgets(2)); // (the footer and settings)
   });
 
   testWidgets('the theme follows the OS, and the choice is kept by the core', (t) async {

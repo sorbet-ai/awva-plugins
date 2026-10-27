@@ -12,6 +12,8 @@
 //   - the controller's MPE setup reaches a new engine: an MCM and a bend range sent before an engine
 //     switch give the same output as sent to that engine directly
 //   - MIDI 1.0 bytes to UMP
+//   - the output chosen, on a fake endpoint list: listed with its bus, kept, missing at the start
+//     (the default plays, a line says so), a switch faded in at -12 dB at most, the buffer its bus allows
 #if defined(_WIN32) && !defined(NOMINMAX)
 #define NOMINMAX
 #endif
@@ -413,7 +415,7 @@ void bluetooth_policy_checks() {
 		w.endpoint("usb", Bus::Usb, 0);
 		bool none = w.frames(144, 144, 480) == 144 && w.frames(0, 144, 480) == 144 && w.frames(64, 144, 480) == 144 && w.frames(256, 144, 480) == 256;
 		for (uint64_t t = 0; t < 10; t++) none = none && w.glitch(t * 1000000ull, 144) == EndpointBuffer::Action::None;
-		check(none && !w.shared_only() && w.learned() == 0 && w.note(true, 144).empty(),
+		check(none && !w.shared_only() && w.learned() == 0 && w.note(true).empty(),
 		    "endpoints: a wired or USB endpoint's exclusive buffer is the one asked for (the device's smallest at least), glitches or not");
 	}
 	{
@@ -427,7 +429,7 @@ void bluetooth_policy_checks() {
 		const auto b1 = bt.glitch(100000000000ull, 960), b2 = bt.glitch(131000000000ull, 960); // (31 s apart: not a rate)
 		const auto b3 = bt.glitch(132000000000ull, 960);
 		const bool shared = b1 == EndpointBuffer::Action::None && b2 == EndpointBuffer::Action::None && b3 == EndpointBuffer::Action::Shared && bt.shared_only() &&
-		    bt.note(true, 480).find("playing shared") != std::string::npos && bt.note(false, 480).empty();
+		    bt.note(true).find("playing shared") != std::string::npos && bt.note(false).empty();
 		EndpointBuffer again;
 		again.endpoint("bt", Bus::Bluetooth, -1);
 		check(start && raised && shared && again.shared_only(),
@@ -466,7 +468,7 @@ void bluetooth_checks(const std::string& builtin, const std::string& scratch) {
 	    a.str("mode").c_str(), static_cast<int>(a.num("buffer", 0)), static_cast<int>(a.num("latency_buffer_frames", 0)), static_cast<int>(a.num("learned", 0)),
 	    a.str("message").c_str());
 	check(a.str("mode") == "exclusive" && a.num("buffer", 0) == 960 && a.num("latency_buffer_frames", 0) == 960 && a.num("learned", 0) == 960 &&
-	          a.str("bus") == "bluetooth" && a.str("message").find("raised to 960") != std::string::npos && a.num("recoveries", 0) == 1,
+	          a.str("bus") == "bluetooth" && a.str("message").empty() && a.num("recoveries", 0) == 1,
 	    s);
 	std::string saved;
 	read_file(settings, &saved, 1u << 16);
@@ -497,6 +499,61 @@ void bluetooth_checks(const std::string& builtin, const std::string& scratch) {
 	std::remove(settings.c_str());
 }
 
+// the output chosen (a fake endpoint list: no device opened): listed with its bus; the choice kept
+// for the next start; a missing one plays the default and says so; a switch opens the stream again
+// on the new output, faded in at -12 dB at most, its buffer as that output's bus allows
+void output_device_checks(const std::string& builtin, const std::string& scratch) {
+	const std::string settings = join(scratch, "device-settings.json");
+	std::remove(settings.c_str());
+	const std::string list = "[{\"id\": \"speakers\", \"name\": \"Speakers\", \"bus\": \"other\"}, {\"id\": \"usb-dac\", \"name\": \"USB DAC\", \"bus\": \"usb\"},"
+	                         " {\"id\": \"buds\", \"name\": \"Buds\", \"bus\": \"bluetooth\"}]";
+	auto start = [&](const std::string& devices) {
+		const std::string o = "{\"no_audio\": true, \"midi\": false, \"settings\": " + jstr(settings) + ", \"builtin_dir\": " + jstr(builtin) +
+		    ", \"engines_dir\": " + jstr(join(scratch, "none")) + ", \"simulate_devices\": " + devices + "}";
+		return awva_start(o.c_str()) == 0 && awva_select_engine("builtin:sine") == 0;
+	};
+	auto audio = [] {
+		Json j;
+		if (!Json::parse(awva_audio(), &j)) j = Json{};
+		return j;
+	};
+	if (!start(list)) return check(false, "outputs: the core starts");
+	Json d;
+	Json::parse(awva_audio_devices(), &d);
+	const bool listed = d.a.size() == 3 && d.a[0].str("name") == "Speakers" && d.a[0].flag("default", false) && d.a[1].str("bus") == "usb" &&
+	    d.a[2].str("bus") == "bluetooth" && !d.a[2].flag("default", true);
+	Json a = audio();
+	check(listed && a.str("device") == "Speakers" && a.str("chosen").empty() && !a.flag("missing", true),
+	    "outputs: every endpoint listed with its bus and the default; the default plays when none is chosen");
+	awva_set_master_db(0.0f);
+	awva_set_audio_mode("exclusive", 144);
+	const bool usb = awva_set_audio_device("usb-dac") == 0;
+	awva_status st;
+	awva_status_get(&st);
+	a = audio();
+	char s[300];
+	std::snprintf(s, sizeof s, "outputs: the USB DAC chosen plays %s at %d frames on %s; the level %.1f dB", a.str("device").c_str(), static_cast<int>(a.num("buffer", 0)),
+	    a.str("bus").c_str(), st.master_db);
+	check(usb && a.str("device") == "USB DAC" && a.str("bus") == "usb" && a.str("mode") == "exclusive" && a.num("buffer", 0) == 144 && st.master_db == -12.0f, s);
+	const bool bt = awva_set_audio_device("buds") == 0;
+	a = audio();
+	std::snprintf(s, sizeof s, "outputs: Bluetooth buds chosen: exclusive at %d frames (the device's period at least)", static_cast<int>(a.num("buffer", 0)));
+	check(bt && a.str("device") == "Buds" && a.str("bus") == "bluetooth" && a.num("buffer", 0) == 480, s);
+	check(awva_set_audio_device("nosuch") != 0 && audio().str("device") == "Buds", "outputs: an output not listed is refused");
+	awva_stop();
+	std::string saved;
+	read_file(settings, &saved, 1u << 16);
+	check(saved.find("\"output_device\": \"buds\"") != std::string::npos, "outputs: the choice is kept in the settings");
+	// the next start, the buds gone: the default plays, and says so
+	if (!start("[{\"id\": \"speakers\", \"name\": \"Speakers\", \"bus\": \"other\"}]")) return check(false, "outputs: the core starts again");
+	a = audio();
+	std::snprintf(s, sizeof s, "outputs: the saved output missing at the start: plays %s, \"%s\"", a.str("device").c_str(), a.str("notice").c_str());
+	check(a.str("device") == "Speakers" && a.flag("missing", false) && a.str("chosen") == "buds" && a.str("notice") == "Buds isn't connected: playing the default", s);
+	check(awva_set_audio_device("") == 0 && !audio().flag("missing", true) && audio().str("notice").empty(), "outputs: the system default chosen again");
+	awva_stop();
+	std::remove(settings.c_str());
+}
+
 void midi1_checks() {
 	const uint8_t b[] = {0x91, 60, 100, 0xd1, 50, 0xf8, 0xe1, 0x00, 0x40, 0xf0, 1, 2, 3, 0xf7, 0xb1, 74, 64};
 	const std::vector<uint32_t> w = midi1_to_ump(b, sizeof b);
@@ -520,6 +577,7 @@ int main(int argc, char** argv) {
 	burst_checks(argv[1], argv[2]);
 	bluetooth_policy_checks();
 	bluetooth_checks(argv[1], argv[2]);
+	output_device_checks(argv[1], argv[2]);
 	std::printf("%s\n", failures ? "app_tests: FAILED" : "app_tests: ok");
 	return failures ? 1 : 0;
 }
