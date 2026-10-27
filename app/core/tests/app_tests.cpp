@@ -38,6 +38,7 @@
 #include "buffer_policy.h"
 #include "endpoint_gain.h"
 #include "safety.h"
+#include "step_spread.h"
 
 using namespace awva_app;
 
@@ -383,29 +384,71 @@ void exclusive_volume_checks(const std::string& builtin, const std::string& scra
 	check(shared > 1e-3 && std::fabs(diff - want) < 0.01, b);
 }
 
-// a burst (1000 MIDI messages in one buffer, as a late wake-up after a dense controller gives): the
-// app spreads it over the engine's steps, so nothing is dropped; every note ends
-void burst_checks(const std::string& builtin, const std::string& scratch) {
-	const std::string o = "{\"no_audio\": true, \"midi\": false, \"settings\": \"\", \"builtin_dir\": " + jstr(builtin) + ", \"engines_dir\": " +
-	    jstr(join(scratch, "none")) + "}";
-	if (awva_start(o.c_str()) != 0 || awva_select_engine("builtin:va") != 0) return check(false, "burst: the core starts");
+// a burst of MIDI (a late wake-up after a dense controller: 10 notes, 880 pressures, their Note
+// Offs) as the audio thread takes it, placed on the steps (step_spread.h) and played by the built-in
+// va through the Player, block by block: no sleeps, no threads. It comes in one buffer, and split
+// over buffers as when it arrives while the audio thread is taking it (the first part spread past
+// the next buffers' starts: the second part used to pile onto its last step, past the 256 a block
+// the engine's tables take, and a Note Off there was dropped). No step gets more than kPerStep,
+// the order is kept, every Note Off is taken.
+void burst_checks(const std::string& builtin) {
+	nsc_library l;
+	if (!nsc_load_check(join(builtin, std::string("va") + library_suffix()), &l)) return check(false, "burst: va loads");
 	std::vector<uint32_t> w;
-	for (int n = 0; n < 10; n++) w.push_back(0x20910000u | (1u + n) << 16 | static_cast<uint32_t>(50 + n) << 8 | 100u); // (Note On, channels 2..11)
-	for (int k = 0; k < 97; k++)
-		for (int n = 0; n < 10; n++) w.push_back(0x20d10000u | (1u + n) << 16 | static_cast<uint32_t>(40 + k % 60) << 8); // (pressure)
-	for (int n = 0; n < 10; n++) w.push_back(0x20810000u | (1u + n) << 16 | static_cast<uint32_t>(50 + n) << 8 | 64u); // (Note Off)
-	for (auto& x : w) x = (x & 0xfff0ffffu) | (x & 0x000f0000u); // (channel in the status nibble)
-	awva_ump(w.data(), static_cast<int32_t>(w.size()));
-	std::this_thread::sleep_for(std::chrono::milliseconds(300));
-	awva_status a;
-	awva_status_get(&a);
-	std::this_thread::sleep_for(std::chrono::milliseconds(3000)); // (the release tails)
-	awva_status b;
-	awva_status_get(&b);
-	awva_stop();
-	char s[160];
-	std::snprintf(s, sizeof s, "burst: %zu messages in one buffer, spread over the steps: every Note Off taken (voices %d, then %d)", w.size(), a.voices, b.voices);
-	check(b.voices == 0, s);
+	for (int n = 0; n < 10; n++) w.push_back(0x20900000u | (1u + n) << 16 | static_cast<uint32_t>(50 + n) << 8 | 100u); // (Note On, channels 2..11)
+	for (int k = 0; k < 88; k++)
+		for (int n = 0; n < 10; n++) w.push_back(0x20d00000u | (1u + n) << 16 | static_cast<uint32_t>(40 + k % 60) << 8); // (pressure)
+	for (int n = 0; n < 10; n++) w.push_back(0x20800000u | (1u + n) << 16 | static_cast<uint32_t>(50 + n) << 8 | 64u); // (Note Off)
+	const int total = static_cast<int>(w.size());
+	struct Split {
+		const char* what;
+		std::vector<int> parts; // messages taken by each buffer, in turn
+	};
+	const Split splits[] = {
+	    {"in one buffer", {total}},
+	    {"in two buffers", {600, total - 600}},
+	    {"700, then 70 a buffer", {700, 70, 70, total - 840}},
+	    {"64 a buffer", std::vector<int>((total + 63) / 64, 64)},
+	};
+	const uint64_t step = 96, period = 256; // (48 kHz: the 2 ms step; the null sink's buffer)
+	for (const Split& sp : splits) {
+		Player p;
+		p.prepare(48000);
+		p.safety.set_now_db(0.0f);
+		Instance in(*l.c);
+		in.init(48000);
+		p.inst = &in;
+		StepSpread spread;
+		spread.reset(in.frame());
+		std::vector<uint64_t> frames;
+		std::vector<float> outl(period), outr(period);
+		int at = 0, most = 0;
+		bool ordered = true;
+		for (size_t b = 0; b < 48000 * 3 / period; b++) {
+			const int take = b < sp.parts.size() ? std::min(sp.parts[b], total - at) : 0;
+			for (int i = 0; i < take; i++, at++) {
+				const uint64_t f = spread.place(in.frame(), step);
+				ordered = ordered && (frames.empty() || f >= frames.back());
+				frames.push_back(f);
+				const uint32_t m[4] = {w[static_cast<size_t>(at)], 0, 0, 0};
+				p.event(f, m);
+			}
+			(void)p.render(outl.data(), outr.data(), static_cast<uint32_t>(period));
+		}
+		for (size_t i = 0; i < frames.size();) { // the most messages in one step's frames
+			size_t j = i;
+			while (j < frames.size() && frames[j] < frames[i] + step) j++;
+			most = std::max(most, static_cast<int>(j - i));
+			i = j;
+		}
+		const int left = in.c.active_voices(in.state);
+		p.inst = nullptr;
+		char s[220];
+		std::snprintf(s, sizeof s, "burst of %d messages %s: at most %d a step (%d), in order, every Note Off taken (voices %d after 3 s)", total,
+		    sp.what, most, StepSpread::kPerStep, left);
+		check(at == total && ordered && most <= StepSpread::kPerStep && left == 0, s);
+	}
+	nsc_unload(&l);
 }
 
 // a Bluetooth endpoint's exclusive buffer (buffer_policy.h): the bus from the endpoint's devnode and
@@ -582,7 +625,7 @@ int main(int argc, char** argv) {
 	package_checks(argv[1], argv[2]);
 	setup_checks(argv[1]);
 	exclusive_volume_checks(argv[1], argv[2]);
-	burst_checks(argv[1], argv[2]);
+	burst_checks(argv[1]);
 	bluetooth_policy_checks();
 	bluetooth_checks(argv[1], argv[2]);
 	output_device_checks(argv[1], argv[2]);

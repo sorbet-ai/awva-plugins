@@ -11,8 +11,9 @@
 //   MIDI threads the OS's: each port's messages into its own ring, timestamped
 // A MIDI message plays from the next buffer rendered, at its first frame: the least delay the output
 // allows (under one period from its arrival); the engine takes it at its next 2 ms step. A burst (more
-// than kPerStep in one buffer: a late wake-up, a dense controller) goes on over the next steps, in
-// order, so no step gets more than the engine's tables take (the board's sizes: 256 a step).
+// than StepSpread::kPerStep in a step: a late wake-up, a dense controller) goes on over the next
+// steps, in order, so no step gets more than the engine's tables take (the board's sizes: 256 a
+// step), however the buffers split it (step_spread.h).
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -34,6 +35,7 @@
 #include "midi.h"
 #include "platform.h"
 #include "player.h"
+#include "step_spread.h"
 #include "wav.h"
 
 namespace awva_app {
@@ -544,8 +546,7 @@ public:
 			for (int j = i; j > 0 && batch_[j].ns < batch_[j - 1].ns; j--) std::swap(batch_[j], batch_[j - 1]);
 		const uint64_t step = static_cast<uint64_t>((rate_ + 499) / 500); // (the engine's 2 ms step, frames)
 		for (int i = 0; i < k; i++) {
-			const uint64_t f = std::max(batch_[i].f + static_cast<uint64_t>(i / kPerStep) * step, last_frame_);
-			last_frame_ = f;
+			const uint64_t f = spread_.place(batch_[i].f, step); // (step_spread.h: at most kPerStep a step)
 			player_.event(f, batch_[i].w);
 			// measured: from the message's time to its frame's time in this output stream
 			const double at = static_cast<double>(host_ns) + (static_cast<double>(f) - static_cast<double>(base)) * 1e9 / rate_;
@@ -579,7 +580,7 @@ private:
 		case Cmd::Swap: {
 			player_.strict = c.i != 0;
 			Instance* old = player_.swap(static_cast<Instance*>(c.p));
-			last_frame_ = player_.inst ? player_.inst->frame() : 0;
+			spread_.reset(player_.inst ? player_.inst->frame() : 0);
 			if (old) (void)rets_.push({Ret::Inst, old});
 			generation_.fetch_add(1);
 			return;
@@ -728,9 +729,9 @@ private:
 		double min = 0, mean = 0, max = 0;
 	} lat_last_;
 	static constexpr int kBatch = 2048;
-	static constexpr int kPerStep = 64; // MIDI messages placed in one engine step at most
 	Batched batch_[kBatch];
-	uint64_t last_frame_ = 0, last_host_ns_ = 0;
+	StepSpread spread_; // the frames MIDI is placed at, on the engine's steps
+	uint64_t last_host_ns_ = 0;
 
 	WavWriter wav_;
 	std::atomic<bool> probe_run_{false};
