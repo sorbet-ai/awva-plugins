@@ -33,7 +33,7 @@ String _raw(FfiBackend core, String what) => what == 'catalog'
         for (final e in core.catalog())
           {
             'key': e.key, 'label': e.label, 'source': e.source, 'builtin': e.builtin, 'id': e.id, 'title': e.title,
-            'version': e.version, 'summary': e.summary, 'colour': e.colour, 'ok': e.ok, 'error': e.error, 'refused': e.refused,
+            'version': e.version, 'ok': e.ok, 'error': e.error, 'refused': e.refused,
           }
       ])
     : core.soundJson();
