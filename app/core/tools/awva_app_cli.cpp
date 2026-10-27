@@ -4,6 +4,8 @@
 // The core without the UI, for smoke runs, renders and CI. Never opens an audio device unless
 // told to (it has no option for that: every mode here runs the null sink or renders offline).
 //
+//   awva_app_cli version
+//       the awva commit it's built on and the component ABI it loads: {"awva": "<commit>", "abi": N}
 //   awva_app_cli list [--engines DIR] [--builtin DIR]
 //       the catalog (built-in engines and packages) as JSON
 //   awva_app_cli smoke [--engine KEY] [--seconds S] [--probe OUT.wav] [--engines DIR] [--builtin DIR]
@@ -193,6 +195,10 @@ int render(int argc, char** argv) {
 
 int main(int argc, char** argv) {
 	const std::string mode = argc > 1 ? argv[1] : "";
+	if (mode == "version") {
+		std::printf("{\"awva\":\"%s\",\"abi\":%d}\n", AWVA_APP_AWVA_COMMIT, NSC_ABI);
+		return 0;
+	}
 	if (mode == "list") {
 		if (awva_start(options(argc, argv, "").c_str()) != 0) return 2;
 		std::printf("%s\n", awva_catalog());
@@ -206,6 +212,6 @@ int main(int argc, char** argv) {
 		std::printf("%s\n%s\n", query_output_json().c_str(), outputs_json().c_str());
 		return 0;
 	}
-	std::fprintf(stderr, "usage: awva_app_cli list|check|smoke|render [options] (see the source's header)\n");
+	std::fprintf(stderr, "usage: awva_app_cli version|list|check|smoke|render|devices [options] (see the source's header)\n");
 	return 2;
 }

@@ -5,8 +5,9 @@
 # Build and test the awva plugins natively.
 #   Windows (Git Bash): clang with Visual Studio's libraries (found with vswhere)
 #   macOS:              Xcode's clang; cmake and ninja from Homebrew (/opt/homebrew/bin)
-# Usage: ./build.sh [build|test|all|bench] [ctest arguments...]     (build dir: build/)
+# Usage: ./build.sh [build|test|all|bench|cli] [ctest arguments...]     (build dir: build/)
 #   bench: the CPU load and latency table and its check (awva_bench: build/bench/table.md)
+#   cli:   the app's awva_app_cli and the built-in engines only (build/app), on the pinned awva
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 what="${1:-all}"
@@ -42,6 +43,10 @@ if [ "$what" = build ] || [ "$what" = all ]; then
 fi
 if [ "$what" = test ] || [ "$what" = all ]; then
   in_env "ctest --test-dir build -L plugin --output-on-failure $*"
+fi
+if [ "$what" = cli ]; then
+  in_env "cmake -S . -B build $gen -DCMAKE_BUILD_TYPE=Release"
+  in_env "cmake --build build --target awva_app_cli"
 fi
 if [ "$what" = bench ]; then
   in_env "cmake --build build --target awva_bench"

@@ -124,11 +124,12 @@ A package is written as `<name>.awvapkg.tmp` and then renamed, so the app never 
 ## The iteration loop
 
 `app/tools/iterate.sh ENGINE AWVA_DIR [--presets-only] [--label TEXT]`:
-1. It builds an engine change into `<engine>-iter<n>.awvapkg`. The change is an awva checkout on
-   the app's awva commit; its nsc.h is checked against the pin. The package is built with awva's
-   own sdk and packager.
+1. It builds an engine change into `<engine>-iter<n>.awvapkg`. ENGINE is any engine of the app's
+   awva commit. The change is an awva checkout on that commit; its nsc.h is checked against the pin.
+   The package is built with awva's own sdk and packager.
 2. It checks the package as the app plays it (`awva_app_cli check`: every preset finite and
-   sounding), and compares it with the built-in engine, preset by preset.
+   sounding), and compares it with the built-in engine, preset by preset. The CLI is this
+   repository's, built first on the pinned awva (`./build.sh cli`), so a stale build is never used.
 
 The running app lists the package within two seconds, because it scans the folder again whenever
 it changes. Ctrl+R / Cmd+R, or "Rescan your engines", rescans at once.

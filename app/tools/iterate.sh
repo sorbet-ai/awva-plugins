@@ -7,7 +7,7 @@
 # built-in engine it changes.
 #
 #   app/tools/iterate.sh ENGINE AWVA_DIR [options]
-#     ENGINE           accordion bowed brass ep modal reed sine trumpet va wind
+#     ENGINE           any engine of the app's awva (its dsp/include/awva/engines/<ENGINE>.h at AWVA_COMMIT)
 #     AWVA_DIR         the awva checkout with the change, on the app's awva commit (AWVA_COMMIT):
 #                      its nsc.h must be that commit's (the package format's pin)
 #   options
@@ -15,7 +15,8 @@
 #     --label TEXT     the name the app lists ("<engine> iter <n>" by default)
 #     --engines DIR    the packages folder (default: the app's: %APPDATA%\awva\engines,
 #                      ~/Library/Application Support/awva/engines)
-#     --cli PATH       awva_app_cli (default: build/app/awva_app_cli of this repository), for the check
+#     --cli PATH       awva_app_cli, for the check (default: this repository's build/app/awva_app_cli,
+#                      built first: ./fetch_deps.sh, ./build.sh cli); it must be built on AWVA_COMMIT
 #
 # What it does: builds awva's own package_<ENGINE> target from AWVA_DIR (its sdk, in AWVA_DIR/build/
 # iterate, incremental: the first build compiles every engine once): the engine's package library
@@ -47,11 +48,6 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
-case "$engine" in
-accordion | bowed | brass | ep | modal | reed | sine | trumpet | va | wind) ;;
-*) die "$engine isn't an awva engine" ;;
-esac
-
 case "$(uname -s)" in
 MINGW* | MSYS* | CYGWIN*) os=windows suffix=.dll exe=.exe ;;
 Darwin) os=macos suffix=.dylib exe= ;;
@@ -62,8 +58,6 @@ if [ -z "$engines" ]; then
   if [ "$os" = windows ]; then engines="$(cygpath -u "$APPDATA")/awva/engines"; else engines="$HOME/Library/Application Support/awva/engines"; fi
 fi
 mkdir -p "$engines"
-[ -n "$cli" ] || cli="$HERE/build/app/awva_app_cli$exe"
-[ -x "$cli" ] || die "no $cli: build the app's core first (./build.sh build)"
 packer="$awva/component/tools/nsc_pack.py"
 [ -f "$packer" ] || die "$awva has no packager (component/tools/nsc_pack.py): not on the app's awva"
 py="$(command -v python3 || command -v python)"
@@ -74,6 +68,27 @@ short="${base:0:7}"
 git -C "$awva" cat-file -e "$base^{commit}" 2> /dev/null || die "$awva doesn't have the app's awva commit $short"
 git -C "$awva" merge-base --is-ancestor "$base" HEAD || die "$awva isn't on $short (the app plays packages built on it)"
 git -C "$awva" diff --quiet "$base" -- component/include/nsc/nsc.h || die "$awva's nsc.h differs from $short's: not a package this app loads"
+
+# the engine: one of the app's awva's (as its dsp/CMakeLists.txt lists them: include/awva/engines/*.h)
+known="$(git -C "$awva" ls-tree --name-only "$base" dsp/include/awva/engines/ | sed -n 's#^.*/\([a-z_0-9]*\)\.h$#\1#p' | tr '\n' ' ')"
+case " $known" in
+*" $engine "*) ;;
+*) die "$engine isn't an engine of awva $short ($known)" ;;
+esac
+
+# the check's CLI: this repository's, built on the pinned awva (a stale build is built again), or the
+# one given, which must be built on it too
+if [ -z "$cli" ]; then
+  cli="$HERE/build/app/awva_app_cli$exe"
+  echo "iterate: building the app's CLI on awva $short (./build.sh cli)"
+  "$HERE/fetch_deps.sh" > /dev/null
+  "$HERE/build.sh" cli > /dev/null || die "the app's CLI didn't build (./build.sh cli)"
+fi
+[ -x "$cli" ] || die "no $cli"
+case "$("$cli" version 2> /dev/null || true)" in
+*"\"awva\":\"$base\""*) ;;
+*) die "$cli isn't built on awva $short (stale: ./build.sh cli, or leave out --cli)" ;;
+esac
 
 # the next iteration
 n=1
