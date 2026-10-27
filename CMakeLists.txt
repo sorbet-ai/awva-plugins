@@ -270,6 +270,7 @@ foreach(v IN LISTS AWVA_PLUGIN_ENGINES)
   awva_conformance_tests("plugin.${v}.conformance." "$<TARGET_FILE:awva_${v}_conformance_lib>" KNOWN ${AWVA_KNOWN_${v}} ${AWVA_KNOWN_COMPONENT}
     LABELS "plugin;conformance")
   add_test(NAME plugin.${v}.vst3_presets COMMAND vst3_host_test programs "${CMAKE_BINARY_DIR}/awva_${v}.vst3" "${_lib}")
+  add_test(NAME plugin.${v}.vst3_rates COMMAND vst3_host_test rates "${CMAKE_BINARY_DIR}/awva_${v}.vst3")
   add_test(NAME plugin.${v}.many COMMAND clap_host_test many "${_clap}" "${_lib}")
   # the expressive performances through each format's own events, against awva_render --ump
   set(_vst3 "${CMAKE_BINARY_DIR}/awva_${v}.vst3")

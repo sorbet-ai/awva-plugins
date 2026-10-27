@@ -16,6 +16,10 @@
 //     pressure and CC74 as the parameter changes of their MIDI controllers (IMidiMapping), as a
 //     VST3 host plays MPE. Each must equal awva_render --ftz --ump's render of its UMP stream
 //     (DIR/ref_per_note_RATE.f32, DIR/ref_mpe_vst3_RATE.f32), bit for bit.
+//   vst3_host_test rates PLUGIN.vst3
+//     The sample rates a host may set (the VST3 SDK validator's "Process Format" list): a rate the
+//     plugin takes is accepted by setupProcessing() and then activates and processes; one it
+//     refuses (the engines run at 11.025 to 192 kHz) is refused by setupProcessing() already.
 //   vst3_host_test bench PLUGIN.vst3 VOICES
 //     As clap_host_test bench, through the VST3: "bench vst3 N LOAD%" for 1, 4 and VOICES (the
 //     plugin's voices) notes, and "latency vst3 REPORTED MIN MAX".
@@ -412,9 +416,52 @@ int bench_test(int voices_max) {
 
 } // namespace
 
+// --- rates ------------------------------------------------------------------------------------------------
+int rates_test() {
+	Instance in;
+	if (!in.ok()) return check(false, "rates: the plugin is created"), 1;
+	FUnknownPtr<Vst::IAudioProcessor> processor(in.component);
+	const double rates[] = {22050, 32000, 44100, 48000, 88200, 96000, 192000, 384000, 1234.5678, 12345.678, 123456.78, 1234567.8, 11025, 192001};
+	std::vector<float> l(512), r(512);
+	for (const double rate : rates) {
+		const bool engine_rate = rate >= 11025 && rate <= 192000; // (the engines' own: init() refuses others)
+		Vst::ProcessSetup setup{Vst::kRealtime, Vst::kSample32, 512, rate};
+		const bool setup_ok = processor->setupProcessing(setup) == kResultOk;
+		bool ok = setup_ok == engine_rate;
+		if (setup_ok) {
+			in.component->activateBus(Vst::kAudio, Vst::kOutput, 0, true);
+			const bool active = in.component->setActive(true) == kResultOk;
+			ok = ok && active;
+			if (active) {
+				processor->setProcessing(true);
+				float* chans[2] = {l.data(), r.data()};
+				Vst::AudioBusBuffers out;
+				out.numChannels = 2;
+				out.channelBuffers32 = chans;
+				Vst::ProcessData data;
+				data.numSamples = 512;
+				data.symbolicSampleSize = Vst::kSample32;
+				data.numOutputs = 1;
+				data.outputs = &out;
+				ok = ok && processor->process(data) == kResultOk;
+				processor->setProcessing(false);
+				in.component->setActive(false);
+			}
+		}
+		char b[200];
+		std::snprintf(b, sizeof b, "rates: %.4f Hz %s", rate, engine_rate ? "set up, activated and processed" : "refused by setupProcessing()");
+		check(ok, b);
+	}
+	// (the last rate was refused: the setup before it stays, and activates)
+	const bool again = in.component->setActive(true) == kResultOk;
+	if (again) in.component->setActive(false);
+	check(again, "rates: after a refused rate, the setup before it activates");
+	return 0;
+}
+
 int main(int argc, char** argv) {
 	if (argc < 3) {
-		std::fprintf(stderr, "usage: vst3_host_test programs|expressive|bench PLUGIN.vst3 [...]\n");
+		std::fprintf(stderr, "usage: vst3_host_test programs|expressive|rates|bench PLUGIN.vst3 [...]\n");
 		return 2;
 	}
 	const std::string mode = argv[1];
@@ -428,6 +475,7 @@ int main(int argc, char** argv) {
 	if (mode == "programs" && argc >= 4) rc = programs_test(argv[3]);
 	else if (mode == "expressive" && argc >= 6) rc = expressive_test(argv[3], argv[4], std::atoi(argv[5]));
 	else if (mode == "bench" && argc >= 4) rc = bench_test(std::atoi(argv[3]));
+	else if (mode == "rates") rc = rates_test();
 	else {
 		std::fprintf(stderr, "vst3_host_test: unknown mode %s, or arguments missing\n", mode.c_str());
 		return 2;

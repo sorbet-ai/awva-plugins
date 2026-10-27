@@ -4,7 +4,7 @@ Two dependencies are Sorbet AI's forks, with fixes for bugs found while building
 
 | dependency | fork | upstream base | pinned commit |
 |---|---|---|---|
-| clap-wrapper | [sorbet-ai/clap-wrapper](https://github.com/sorbet-ai/clap-wrapper/tree/awva) | 0.17.0 (`806bba0`) | [`1dd4219`](https://github.com/sorbet-ai/clap-wrapper/commit/1dd42194a7a1581702d5b5b374b2415599de6f3a) |
+| clap-wrapper | [sorbet-ai/clap-wrapper](https://github.com/sorbet-ai/clap-wrapper/tree/awva) | 0.17.0 (`806bba0`) | [`07909d2`](https://github.com/sorbet-ai/clap-wrapper/commit/07909d222e9d7c2a91cf748548566e0ba59f1732) |
 | clap-validator | [sorbet-ai/clap-validator](https://github.com/sorbet-ai/clap-validator/tree/awva) | 0.4.1 (`152b982`) | [`6d72c15`](https://github.com/sorbet-ai/clap-validator/commit/6d72c15564eaf4de253f6b33337059f77358a08d) |
 
 ## clap-wrapper
@@ -16,6 +16,7 @@ In [`5a8ac81`](https://github.com/sorbet-ai/clap-wrapper/commit/5a8ac813c73114ac
 - **The AUv2's Info.plist after a re-configure:** with Ninja and Makefiles, CMake writes the bundle's generic plist again at every configure, and the AU's own plist was copied in only when the target linked. A re-configure therefore left a component that wasn't an AU. Now `<target>-info-plist` copies it in whenever either plist changes. It follows the target without depending on the binary's file, so signing the bundle afterwards doesn't make it run again. The plugins sign each AU after that target.
 - **No Cocoa view without a gui:** `GetProperty(kAudioUnitProperty_CocoaUI)` returned a view for a plugin that has no gui extension, although `GetPropertyInfo` already refused one.
 - **The AU preset name:** the class data carried the wrapper's own "Program" instead of the preset a host had set, which caused auval's "Preset name is not retained in retrieved class data" warning on every AU. It now carries the AU SDK's current preset, and restoring class data sets that preset again.
+- [`791db41`](https://github.com/sorbet-ai/clap-wrapper/commit/791db41), [`07909d2`](https://github.com/sorbet-ai/clap-wrapper/commit/07909d222e9d7c2a91cf748548566e0ba59f1732) **A refused sample rate in VST3:** a CLAP plugin refuses a rate only in `activate()`, but a VST3 host that got `kResultOk` from `setupProcessing()` expects `setActive(true)` to succeed. The VST3 SDK validator's Process Format test failed at 384 kHz, which the plugins refuse (the engines run at 11.025 to 192 kHz). While inactive, `setupProcessing()` now tries the setup (activate, deactivate), refuses a rate the plugin refuses, and keeps the setup in place before it. `vst3_host_test rates` (ctest `plugin.<engine>.vst3_rates`) checks it, and the SDK validator passes all 537 tests.
 
 ## clap-validator
 
