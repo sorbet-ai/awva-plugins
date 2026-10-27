@@ -1,7 +1,7 @@
 # awva: design
 
 The design of the awva standalone app, and of the editor the awva plugins show in a DAW (the same
-screen). Everything here is in `lib/src/theme.dart`; the screens are `lib/src/screen.dart`.
+screen). Everything here is in `lib/src/theme.dart`; the screen is `lib/src/screen.dart` and its parts (`screen_*.dart`).
 
 ## 1. Direction
 
