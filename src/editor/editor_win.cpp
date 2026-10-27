@@ -56,7 +56,7 @@ struct Shared {
 		DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory5), reinterpret_cast<IUnknown**>(&dw));
 		CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic));
 		if (d2d) {
-			const D2D1_STROKE_STYLE_PROPERTIES p = D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND);
+			const D2D1_STROKE_STYLE_PROPERTIES p = D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_LINE_JOIN_ROUND);
 			d2d->CreateStrokeStyle(p, nullptr, 0, &round);
 		}
 		// DM Sans from memory
@@ -143,6 +143,23 @@ public:
 	void disc(float cx, float cy, float r, uint32_t argb) override {
 		brush_->SetColor(col(argb));
 		rt_->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy), r, r), brush_);
+	}
+	void polyline(const float* xy, int n, uint32_t argb, float width) override {
+		if (n < 2) return;
+		ID2D1PathGeometry* g = nullptr;
+		ID2D1GeometrySink* s = nullptr;
+		if (FAILED(shared().d2d->CreatePathGeometry(&g)) || FAILED(g->Open(&s))) {
+			release(g);
+			return;
+		}
+		s->BeginFigure(D2D1::Point2F(xy[0], xy[1]), D2D1_FIGURE_BEGIN_HOLLOW);
+		for (int i = 1; i < n; i++) s->AddLine(D2D1::Point2F(xy[2 * i], xy[2 * i + 1]));
+		s->EndFigure(D2D1_FIGURE_END_OPEN);
+		s->Close();
+		brush_->SetColor(col(argb));
+		rt_->DrawGeometry(g, brush_, width, shared().round);
+		release(s);
+		release(g);
 	}
 	void text(const std::string& s, const Rect& r, const awva_tokens::Type& t, uint32_t argb, Align a) override {
 		IDWriteTextFormat* f = format(t);

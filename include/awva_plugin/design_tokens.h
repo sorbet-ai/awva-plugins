@@ -33,6 +33,9 @@ inline constexpr float knob = 76.0f;
 inline constexpr float knobStroke = 5.0f;
 inline constexpr float sliderStroke = 4.0f;
 inline constexpr float meterStroke = 2.0f;
+inline constexpr float iconSmall = 14.0f;
+inline constexpr float iconRow = 16.0f;
+inline constexpr float tipWidth = 300.0f;
 
 struct Type {
 	float size, line;
@@ -42,6 +45,7 @@ struct Type {
 inline constexpr const char* kFamily = "DM Sans";
 inline constexpr Type typeMicro = {11.0f, 14.0f, 600, 0.6f};
 inline constexpr Type typeSmall = {12.0f, 16.0f, 400, 0.0f};
+inline constexpr Type typeSmallStrong = {12.0f, 16.0f, 600, 0.0f};
 inline constexpr Type typeBody = {13.0f, 18.0f, 400, 0.0f};
 inline constexpr Type typeBodyStrong = {13.0f, 18.0f, 500, 0.0f};
 inline constexpr Type typeValue = {12.0f, 16.0f, 500, 0.0f};

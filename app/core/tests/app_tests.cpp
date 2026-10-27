@@ -201,8 +201,9 @@ void package_checks(const std::string& builtin, const std::string& scratch) {
 	const std::string root = join(scratch, "engines");
 	make_dirs(root);
 	const std::string lib = join(builtin, std::string("va") + library_suffix());
-	// a preset of va, written by the component itself
-	std::string preset;
+	// a preset of va, written by the component itself; and va's factory preset 0 as its file (as a
+	// package's image carries its presets/<id> files)
+	std::string preset, factory0;
 	{
 		nsc_library l;
 		if (nsc_load_check(lib, &l)) {
@@ -211,14 +212,18 @@ void package_checks(const std::string& builtin, const std::string& scratch) {
 			l.c->set_param(in.state, 0, l.c->desc->params[0].min);
 			char buf[16384];
 			preset.assign(buf, l.c->save_preset(in.state, "Package Sound", buf, sizeof buf));
+			l.c->set_preset(in.state, 0);
+			factory0.assign(buf, l.c->save_preset(in.state, l.c->desc->presets[0].name, buf, sizeof buf));
 		}
 	}
 	const std::string pin = AWVA_APP_AWVA_COMMIT;
 	// a library package: the built-in va as a package, its preset and another engine's
 	write_awvapkg(join(root, "va-test.awvapkg"), manifest("va test (fit)", "va", pin.substr(0, 7), true), {{host_tag(), lib}},
-	    {{"01-package-sound", preset}, {"02-not-va", "{\"format\": \"awva-preset/1\", \"engine\": \"bowed\", \"params\": {}}"}});
-	// a presets-only package for the built-in va
+	    {{"00-factory", factory0}, {"01-package-sound", preset}, {"02-not-va", "{\"format\": \"awva-preset/1\", \"engine\": \"bowed\", \"params\": {}}"}});
+	// a presets-only package for the built-in va, and one whose file name comes after the library
+	// package's (it binds to the built-in all the same, never to another package's library)
 	write_awvapkg(join(root, "va-fit.awvapkg"), manifest("va fit v1", "va", "", false), {}, {{"01-fit", preset}});
+	write_awvapkg(join(root, "va-zfit.awvapkg"), manifest("va fit v2", "va", "", false), {}, {{"01-fit", preset}});
 	// refused ones
 	write_awvapkg(join(root, "broken-base.awvapkg"), manifest("old base", "va", "1726a05", true), {{host_tag(), lib}}, {});
 	write_awvapkg(join(root, "broken-target.awvapkg"), manifest("another computer", "va", pin, true), {{"armv7em-fpv5-d16-softfp", lib}}, {});
@@ -241,8 +246,11 @@ void package_checks(const std::string& builtin, const std::string& scratch) {
 	check(pa && pa->ok && pa->label == "va test (fit)" && pa->c != va->c, "packages: an .awvapkg's image for this computer loads from its own copy, under its label");
 	check(pa && pa->presets.size() == static_cast<size_t>(pa->c->desc->num_presets) + 1 && pa->presets.back().name == "Package Sound" &&
 	          pa->refused.size() == 1,
-	    "packages: its factory presets, then its preset sections by title; another engine's preset refused");
+	    "packages: its factory presets, then its preset sections by title (a factory preset's own file listed once); another engine's preset refused");
 	check(pb && pb->ok && pb->c == va->c && pb->presets.size() == 1 && pb->label == "va fit v1", "packages: a presets-only package plays the built-in engine with its presets");
+	const Engine* pz = cat.find("package:va-zfit");
+	check(pz && pz->ok && pz->c == va->c && pz->presets.size() == 1,
+	    "packages: a presets-only package after a library package of its engine binds to the built-in, its presets once");
 	{
 		const Engine* e = cat.find("package:broken-base");
 		check(e && !e->ok && !e->c && e->error.rfind("built for a different awva", 0) == 0, "packages: an image built on another awva is refused unloaded: " + (e ? e->error : "?"));

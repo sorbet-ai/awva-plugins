@@ -126,6 +126,16 @@ public:
 		CGContextFillEllipseInRect(c_, CGRectMake(cx - r, cy - r, 2 * r, 2 * r));
 		CGColorRelease(col);
 	}
+	void polyline(const float* xy, int n, uint32_t argb, float width) override {
+		if (n < 2) return;
+		CGColorRef col = cg(argb);
+		CGContextSetStrokeColorWithColor(c_, col);
+		CGContextSetLineWidth(c_, width);
+		CGContextMoveToPoint(c_, xy[0], xy[1]);
+		for (int i = 1; i < n; i++) CGContextAddLineToPoint(c_, xy[2 * i], xy[2 * i + 1]);
+		CGContextStrokePath(c_);
+		CGColorRelease(col);
+	}
 	CFAttributedStringRef attributed(const std::string& s, const awva_tokens::Type& t, uint32_t argb) {
 		CFStringRef str = CFStringCreateWithBytes(nullptr, (const UInt8*)s.data(), (CFIndex)s.size(), kCFStringEncodingUTF8, false);
 		if (!str) return nullptr;

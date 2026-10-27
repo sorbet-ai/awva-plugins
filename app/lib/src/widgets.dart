@@ -9,6 +9,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+import 'param_icon.dart';
 import 'theme.dart';
 
 String paramLabel(String name) => name.replaceAll('_', ' ');
@@ -31,11 +32,15 @@ void claimWheel(PointerSignalEvent e, void Function(double dy) onWheel) {
 // --- the knob ------------------------------------------------------------------------------------
 
 /// A value as a ribbon arc (270 degrees, round caps): drag up or down (shift: fine), scroll, double
-/// click for the default. A bipolar range (min < 0 < max) draws from the centre.
+/// click for the default. A bipolar range (min < 0 < max) draws from the centre. Its name under it,
+/// led by its icon; resting on it shows its tooltip (title and hover: the parameter's text).
 class Knob extends StatefulWidget {
   const Knob({
     super.key,
     required this.label,
+    this.icon = '',
+    this.title = '',
+    this.hover = '',
     required this.value,
     required this.min,
     required this.max,
@@ -44,7 +49,7 @@ class Knob extends StatefulWidget {
     required this.onChanged,
     this.size = AwvaSize.knob,
   });
-  final String label;
+  final String label, icon, title, hover;
   final double value, min, max, def;
   final int kind;
   final ValueChanged<double> onChanged;
@@ -72,45 +77,48 @@ class _KnobState extends State<Knob> {
     final c = AwvaTheme.of(context);
     final active = _drag || _hover;
     final text = formatValue(widget.value, widget.min, widget.max, widget.kind);
-    return MouseRegion(
-      cursor: SystemMouseCursors.resizeUpDown,
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: Listener(
-        onPointerSignal: (e) => claimWheel(e, (dy) => _set(widget.value - dy.sign * (widget.kind != 0 ? 1.0 : _span / 100))),
-        child: GestureDetector(
-          onDoubleTap: () => _set(widget.def),
-          onVerticalDragStart: (_) => setState(() {
-            _drag = true;
-            _v = widget.value;
-          }),
-          onVerticalDragUpdate: (d) {
-            final fine = HardwareKeyboard.instance.isShiftPressed;
-            _v = (_v - d.delta.dy / (fine ? 800 : 200) * _span).clamp(widget.min, widget.max);
-            _set(_v);
-          },
-          onVerticalDragEnd: (_) => setState(() => _drag = false),
-          child: SizedBox(
-            width: widget.size + 24,
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              SizedBox(
-                width: widget.size,
-                height: widget.size,
-                child: CustomPaint(
-                  painter: _KnobPainter(
-                    v: _norm(widget.value),
-                    from: widget.min < 0 && widget.max > 0 ? _norm(0) : 0,
-                    track: c.bg3,
-                    arc: c.sage,
-                    dot: active ? c.text1 : c.text2,
+    return ParamTip(
+      label: widget.title,
+      hover: widget.hover,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.resizeUpDown,
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        child: Listener(
+          onPointerSignal: (e) => claimWheel(e, (dy) => _set(widget.value - dy.sign * (widget.kind != 0 ? 1.0 : _span / 100))),
+          child: GestureDetector(
+            onDoubleTap: () => _set(widget.def),
+            onVerticalDragStart: (_) => setState(() {
+              _drag = true;
+              _v = widget.value;
+            }),
+            onVerticalDragUpdate: (d) {
+              final fine = HardwareKeyboard.instance.isShiftPressed;
+              _v = (_v - d.delta.dy / (fine ? 800 : 200) * _span).clamp(widget.min, widget.max);
+              _set(_v);
+            },
+            onVerticalDragEnd: (_) => setState(() => _drag = false),
+            child: SizedBox(
+              width: widget.size + 24,
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                SizedBox(
+                  width: widget.size,
+                  height: widget.size,
+                  child: CustomPaint(
+                    painter: _KnobPainter(
+                      v: _norm(widget.value),
+                      from: widget.min < 0 && widget.max > 0 ? _norm(0) : 0,
+                      track: c.bg3,
+                      arc: c.sage,
+                      dot: active ? c.text1 : c.text2,
+                    ),
+                    child: Center(child: Text(text, style: AwvaType.value(active ? c.text1 : c.text2))),
                   ),
-                  child: Center(child: Text(text, style: AwvaType.value(active ? c.text1 : c.text2))),
                 ),
-              ),
-              const SizedBox(height: AwvaSize.s1),
-              Text(paramLabel(widget.label),
-                  maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center, style: AwvaType.body(c.text2)),
-            ]),
+                const SizedBox(height: AwvaSize.s1),
+                ParamName(name: widget.label, icon: widget.icon),
+              ]),
+            ),
           ),
         ),
       ),
@@ -147,6 +155,20 @@ class _KnobPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_KnobPainter o) => o.v != v || o.from != from || o.track != track || o.arc != arc || o.dot != dot;
+}
+
+/// A parameter's name as the UI shows it (lower case, spaced), led by its icon, centred
+class ParamName extends StatelessWidget {
+  const ParamName({super.key, required this.name, required this.icon});
+  final String name, icon;
+  @override
+  Widget build(BuildContext context) {
+    final c = AwvaTheme.of(context);
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      if (hasParamIcon(icon)) ...[ParamIcon(icon, color: c.text2, background: c.bg0), const SizedBox(width: 5)],
+      Flexible(child: Text(paramLabel(name), maxLines: 1, overflow: TextOverflow.ellipsis, style: AwvaType.body(c.text2))),
+    ]);
+  }
 }
 
 // --- the level: a fader with its meter ------------------------------------------------------------

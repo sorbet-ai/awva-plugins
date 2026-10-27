@@ -1040,7 +1040,7 @@ int info_test(const char* lib_path, const char* preset_dir) {
 			double v = 0; // (the value after init: the declared default)
 			params->get_value(in.p, pi.id, &v);
 			match = match && pi.default_value == static_cast<double>(q.def) && static_cast<float>(v) == q.def;
-			match = match && pi.id == q.id && std::string(pi.name) == q.name && pi.min_value == q.min && pi.max_value == q.max &&
+			match = match && pi.id == q.id && std::string(pi.name) == (q.label && *q.label ? q.label : q.name) && pi.min_value == q.min && pi.max_value == q.max &&
 			    ((pi.flags & CLAP_PARAM_IS_STEPPED) != 0) == (q.kind != NSC_PARAM_CONTINUOUS) && pi.id != kMonoId && pi.id != CLAP_INVALID_ID;
 		} else {
 			match = match && pi.id == kMonoId && std::string(pi.name) == "mono";

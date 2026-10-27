@@ -10,6 +10,7 @@ import 'package:flutter/widgets.dart';
 
 import 'controller.dart';
 import 'core.dart';
+import 'param_icon.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -314,6 +315,9 @@ class _Body extends StatelessWidget {
                         ? _ToggleTile(p: s.params[i], onChanged: (v) => k.setParam(i, v ? 1 : 0))
                         : Knob(
                             label: s.params[i].name,
+                            icon: s.params[i].icon,
+                            title: s.params[i].label,
+                            hover: s.params[i].hover,
                             value: s.params[i].value,
                             min: s.params[i].min,
                             max: s.params[i].max,
@@ -349,16 +353,19 @@ class _ToggleTile extends StatelessWidget {
   final ValueChanged<bool> onChanged;
   @override
   Widget build(BuildContext context) {
-    final c = AwvaTheme.of(context);
-    return SizedBox(
-      width: AwvaSize.knob + 24,
-      height: AwvaSize.knob + 22,
-      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        const Spacer(),
-        AwvaSwitch(value: p.value >= 0.5, onChanged: onChanged),
-        const Spacer(),
-        Text(paramLabel(p.name), maxLines: 1, overflow: TextOverflow.ellipsis, style: AwvaType.body(c.text2)),
-      ]),
+    return ParamTip(
+      label: p.label,
+      hover: p.hover,
+      child: SizedBox(
+        width: AwvaSize.knob + 24,
+        height: AwvaSize.knob + 22,
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          const Spacer(),
+          AwvaSwitch(value: p.value >= 0.5, onChanged: onChanged),
+          const Spacer(),
+          ParamName(name: p.name, icon: p.icon),
+        ]),
+      ),
     );
   }
 }
@@ -390,7 +397,14 @@ class _AllParams extends StatelessWidget {
     rows.add(SizedBox(
       height: AwvaSize.row,
       child: Row(children: [
-        SizedBox(width: 180, child: Text('mono', style: AwvaType.body(c.text2))),
+        SizedBox(
+          width: 180,
+          child: Row(children: [
+            ParamIcon('mono', color: c.text2, background: c.bg0, size: AwvaSize.iconRow),
+            const SizedBox(width: AwvaSize.s2),
+            Text('mono', style: AwvaType.body(c.text2)),
+          ]),
+        ),
         AwvaSwitch(value: s.mono, onChanged: k.setMono),
       ]),
     ));
@@ -398,7 +412,7 @@ class _AllParams extends StatelessWidget {
   }
 }
 
-/// a parameter as a row: its name, a ribbon slider, its value
+/// a parameter as a row: its icon and name (its tooltip on them), a ribbon slider, its value
 class _ParamRow extends StatelessWidget {
   const _ParamRow({required this.p, required this.onChanged});
   final ParamInfo p;
@@ -411,7 +425,23 @@ class _ParamRow extends StatelessWidget {
     return SizedBox(
       height: AwvaSize.row,
       child: Row(children: [
-        SizedBox(width: 180, child: Text(paramLabel(p.name), maxLines: 1, overflow: TextOverflow.ellipsis, style: AwvaType.body(c.text2))),
+        SizedBox(
+          width: 180,
+          child: Row(children: [
+            ParamTip(
+              label: p.label,
+              hover: p.hover,
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                ParamIcon(p.icon, color: c.text2, background: c.bg0, size: AwvaSize.iconRow),
+                const SizedBox(width: AwvaSize.s2),
+                SizedBox(
+                  width: 180 - AwvaSize.iconRow - AwvaSize.s2 - 4,
+                  child: Text(paramLabel(p.name), maxLines: 1, overflow: TextOverflow.ellipsis, style: AwvaType.body(c.text2)),
+                ),
+              ]),
+            ),
+          ]),
+        ),
         if (p.kind == 2)
           AwvaSwitch(value: p.value >= 0.5, onChanged: (v) => onChanged(v ? 1 : 0))
         else

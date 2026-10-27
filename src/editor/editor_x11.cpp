@@ -136,6 +136,15 @@ public:
 		cairo_arc(c_, cx, cy, r, 0, 2 * M_PI);
 		cairo_fill(c_);
 	}
+	void polyline(const float* xy, int n, uint32_t argb, float width) override {
+		if (n < 2) return;
+		set_color(c_, argb);
+		cairo_set_line_width(c_, width);
+		cairo_new_path(c_);
+		cairo_move_to(c_, xy[0], xy[1]);
+		for (int i = 1; i < n; i++) cairo_line_to(c_, xy[2 * i], xy[2 * i + 1]);
+		cairo_stroke(c_);
+	}
 	// the glyphs of s at x, baseline y, each followed by the type's letter spacing; their width
 	double glyphs(const std::string& s, const awva_tokens::Type& t, double x, double y, std::vector<cairo_glyph_t>* out) {
 		set_font(c_, t);

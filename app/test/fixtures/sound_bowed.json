@@ -4,7 +4,7 @@
     "label": "built in",
     "id": "bowed",
     "title": "Bowed Strings",
-    "version": "ed4010d",
+    "version": "ff09ba9",
     "summary": "bowed strings: friction-driven waveguide strings, modal body, section (9 presets)",
     "builtin": true
   },
@@ -65,7 +65,10 @@
       "max": 4,
       "kind": 0,
       "def": 1,
-      "value": 1.40999997
+      "value": 1.40999997,
+      "label": "Level",
+      "hover": "The overall loudness of the sound. Range 0 to 4.",
+      "icon": "level"
     },
     {
       "name": "force_lo",
@@ -74,7 +77,10 @@
       "max": 1.60000002,
       "kind": 0,
       "def": 0.75,
-      "value": 0.75
+      "value": 0.75,
+      "label": "Bow force, light",
+      "hover": "The bow's force against its speed at a light touch: low is airy, high bites. Range 0.3 to 1.6.",
+      "icon": "bow+soft"
     },
     {
       "name": "force_hi",
@@ -83,7 +89,10 @@
       "max": 1.60000002,
       "kind": 0,
       "def": 0.949999988,
-      "value": 0.949999988
+      "value": 0.949999988,
+      "label": "Bow force, full",
+      "hover": "The bow's force against its speed at a full press: above about 1.1 it turns raucous. Range 0.3 to 1.6.",
+      "icon": "bow+loud"
     },
     {
       "name": "force_over",
@@ -92,7 +101,10 @@
       "max": 2,
       "kind": 0,
       "def": 1,
-      "value": 1
+      "value": 1,
+      "label": "Bow grit",
+      "hover": "The grit added when pressing beyond a full press: 0 none. Range 0 to 2.",
+      "icon": "bow+press"
     },
     {
       "name": "speed_curve",
@@ -101,7 +113,10 @@
       "max": 1,
       "kind": 0,
       "def": 0.699999988,
-      "value": 0.699999988
+      "value": 0.699999988,
+      "label": "Bow speed curve",
+      "hover": "How the bow speed follows pressure: 0 even, 1 the loud end opens up faster. Range 0 to 1.",
+      "icon": "dynamics"
     },
     {
       "name": "rosin",
@@ -110,7 +125,10 @@
       "max": 0.200000003,
       "kind": 0,
       "def": 0.00999999978,
-      "value": 0.00999999978
+      "value": 0.00999999978,
+      "label": "Rosin",
+      "hover": "The bow's grainy noise texture. Range 0 to 0.2.",
+      "icon": "bow+noise"
     },
     {
       "name": "pos",
@@ -119,7 +137,10 @@
       "max": 0.200000003,
       "kind": 0,
       "def": 0.109999999,
-      "value": 0.109999999
+      "value": 0.109999999,
+      "label": "Bow position",
+      "hover": "Where the bow sits on the string, as a fraction of its length from the bridge: small is bright and glassy, large is soft and dark. Range 0.05 to 0.2.",
+      "icon": "bow-position"
     },
     {
       "name": "pos_tilt",
@@ -128,7 +149,10 @@
       "max": 1.5,
       "kind": 0,
       "def": 1,
-      "value": 1
+      "value": 1,
+      "label": "Position by timbre",
+      "hover": "How far timbre moves the bow: up towards the bridge, down towards the fingerboard. Range 0 to 1.5 octaves.",
+      "icon": "bow-position+timbre"
     },
     {
       "name": "pos_press",
@@ -137,7 +161,10 @@
       "max": 1,
       "kind": 0,
       "def": 0.5,
-      "value": 0.5
+      "value": 0.5,
+      "label": "Position by pressure",
+      "hover": "How far a light bow drifts towards the fingerboard. Range 0 to 1 octaves.",
+      "icon": "bow-position+press"
     },
     {
       "name": "damp",
@@ -146,7 +173,10 @@
       "max": 10,
       "kind": 0,
       "def": 4,
-      "value": 5
+      "value": 5,
+      "label": "String ring",
+      "hover": "How long the string rings on its own, measured on a low note. Range 0.5 to 10 s.",
+      "icon": "decay"
     },
     {
       "name": "bright",
@@ -155,7 +185,10 @@
       "max": 3,
       "kind": 0,
       "def": 1,
-      "value": 0.800000012
+      "value": 0.800000012,
+      "label": "Brightness",
+      "hover": "How sharp the string's corners are: above 1 brighter, below 1 rounder. Range 0.3 to 3.",
+      "icon": "tone"
     },
     {
       "name": "tone_lo",
@@ -164,7 +197,10 @@
       "max": 3,
       "kind": 0,
       "def": 0.300000012,
-      "value": 0.300000012
+      "value": 0.300000012,
+      "label": "Treble, light",
+      "hover": "The treble at a light touch. Range 0 to 3.",
+      "icon": "tone+soft"
     },
     {
       "name": "tone_hi",
@@ -173,7 +209,10 @@
       "max": 3,
       "kind": 0,
       "def": 1.20000005,
-      "value": 1
+      "value": 1,
+      "label": "Treble, full",
+      "hover": "The treble at a full press. Range 0 to 3.",
+      "icon": "tone+loud"
     },
     {
       "name": "body_size",
@@ -182,7 +221,10 @@
       "max": 1.5,
       "kind": 0,
       "def": 1,
-      "value": 0.449999988
+      "value": 0.449999988,
+      "label": "Body size",
+      "hover": "The size of the body: 1 a violin, 0.8 a viola, 0.45 a cello, 0.3 a bass. Range 0.2 to 1.5.",
+      "icon": "body+size"
     },
     {
       "name": "body_track",
@@ -191,7 +233,10 @@
       "max": 1,
       "kind": 0,
       "def": 0,
-      "value": 0
+      "value": 0,
+      "label": "Body follows register",
+      "hover": "Whether the body shrinks for low notes: 0 a fixed body, 1 it follows the note. Range 0 to 1.",
+      "icon": "body+register"
     },
     {
       "name": "body_amt",
@@ -200,7 +245,10 @@
       "max": 2,
       "kind": 0,
       "def": 1,
-      "value": 1.10000002
+      "value": 1.10000002,
+      "label": "Body",
+      "hover": "How much of the resonant body you hear. Range 0 to 2.",
+      "icon": "body"
     },
     {
       "name": "body_q",
@@ -209,7 +257,10 @@
       "max": 3,
       "kind": 0,
       "def": 1,
-      "value": 1
+      "value": 1,
+      "label": "Body sharpness",
+      "hover": "How sharp the body's resonances are. Range 0.3 to 3.",
+      "icon": "body+q"
     },
     {
       "name": "hill",
@@ -218,7 +269,10 @@
       "max": 3,
       "kind": 0,
       "def": 0.75,
-      "value": 0.600000024
+      "value": 0.600000024,
+      "label": "Bridge hill",
+      "hover": "The brilliance of the bridge hill, a violin body's 2 to 3 kHz glow. Range 0 to 3.",
+      "icon": "body+bright"
     },
     {
       "name": "direct",
@@ -227,7 +281,10 @@
       "max": 2,
       "kind": 0,
       "def": 0.300000012,
-      "value": 0.25
+      "value": 0.25,
+      "label": "Direct string",
+      "hover": "How much of the string you hear without the body. Range 0 to 2.",
+      "icon": "body+off"
     },
     {
       "name": "acc_force",
@@ -236,7 +293,10 @@
       "max": 3,
       "kind": 0,
       "def": 0,
-      "value": 0
+      "value": 0,
+      "label": "Accent",
+      "hover": "How much firmer the bow bites at a strike: the start's scratch and bite. Range 0 to 3.",
+      "icon": "accent"
     },
     {
       "name": "acc_time",
@@ -245,7 +305,10 @@
       "max": 0.200000003,
       "kind": 0,
       "def": 0.0199999996,
-      "value": 0.0199999996
+      "value": 0.0199999996,
+      "label": "Accent length",
+      "hover": "How long the accent lasts before the note settles. Range 0.002 to 0.2 s.",
+      "icon": "accent+time"
     },
     {
       "name": "acc_noise",
@@ -254,7 +317,10 @@
       "max": 1,
       "kind": 0,
       "def": 0.0399999991,
-      "value": 0.0399999991
+      "value": 0.0399999991,
+      "label": "Accent noise",
+      "hover": "The extra bow noise at a strike. Range 0 to 1.",
+      "icon": "accent+noise"
     },
     {
       "name": "acc_bright",
@@ -263,7 +329,10 @@
       "max": 2,
       "kind": 0,
       "def": 0.400000006,
-      "value": 0.400000006
+      "value": 0.400000006,
+      "label": "Accent brightness",
+      "hover": "How much brighter the start of a struck note is than the sustain. Range 0 to 2.",
+      "icon": "accent+bright"
     },
     {
       "name": "rel",
@@ -272,7 +341,10 @@
       "max": 3,
       "kind": 0,
       "def": 0.100000001,
-      "value": 0.100000001
+      "value": 0.100000001,
+      "label": "Release",
+      "hover": "How long the string rings after a slow release, when the bow stops on the string. Range 0.02 to 3 s.",
+      "icon": "release"
     },
     {
       "name": "rel_ped",
@@ -281,7 +353,10 @@
       "max": 10,
       "kind": 0,
       "def": 3,
-      "value": 3
+      "value": 3,
+      "label": "Release with pedal",
+      "hover": "How much longer the release gets with the sustain pedal down. Range 0 to 10 s.",
+      "icon": "release+pedal"
     },
     {
       "name": "rel_lift",
@@ -290,7 +365,10 @@
       "max": 20,
       "kind": 0,
       "def": 0,
-      "value": 0
+      "value": 0,
+      "label": "Release on a lift",
+      "hover": "How much longer the string rings after a quick lift-off, as a multiplier on the release. Range 0 to 20.",
+      "icon": "release+lift"
     },
     {
       "name": "vibrato",
@@ -299,7 +377,10 @@
       "max": 60,
       "kind": 0,
       "def": 0,
-      "value": 0
+      "value": 0,
+      "label": "Vibrato",
+      "hover": "The depth of the automatic vibrato that sets in after the note starts. Range 0 to 60.",
+      "icon": "vibrato"
     },
     {
       "name": "vib_hz",
@@ -308,7 +389,10 @@
       "max": 9,
       "kind": 0,
       "def": 5.5,
-      "value": 5.5
+      "value": 5.5,
+      "label": "Vibrato rate",
+      "hover": "How fast the vibrato wavers. Range 2 to 9 Hz.",
+      "icon": "vibrato+rate"
     },
     {
       "name": "vib_delay",
@@ -317,7 +401,10 @@
       "max": 2,
       "kind": 0,
       "def": 0.349999994,
-      "value": 0.349999994
+      "value": 0.349999994,
+      "label": "Vibrato delay",
+      "hover": "How long after the start the vibrato reaches its full depth. Range 0 to 2 s.",
+      "icon": "vibrato+time"
     },
     {
       "name": "life",
@@ -326,7 +413,10 @@
       "max": 1,
       "kind": 0,
       "def": 0,
-      "value": 0
+      "value": 0,
+      "label": "Life",
+      "hover": "Micro-randomness: 0 every note identical, 1 each one slightly different. Range 0 to 1.",
+      "icon": "life"
     },
     {
       "name": "tremolo",
@@ -335,7 +425,10 @@
       "max": 2,
       "kind": 0,
       "def": 1.29999995,
-      "value": 1.29999995
+      "value": 1.29999995,
+      "label": "Tremolo by shake",
+      "hover": "How much a shake (the motion input) moves the bow; a strong shake reverses it into a tremolo. Range 0 to 2.",
+      "icon": "bow+shake"
     },
     {
       "name": "body_rot",
@@ -344,7 +437,10 @@
       "max": 2,
       "kind": 0,
       "def": 0.699999988,
-      "value": 0.699999988
+      "value": 0.699999988,
+      "label": "Body by rotation",
+      "hover": "How far rotation (the motion input) shifts the body resonances, in octaves. Range -2 to 2 octaves.",
+      "icon": "spin"
     },
     {
       "name": "ensemble",
@@ -353,7 +449,10 @@
       "max": 1.5,
       "kind": 0,
       "def": 0,
-      "value": 0
+      "value": 0,
+      "label": "Section",
+      "hover": "The level of two more players on the note: 0 solo. Range 0 to 1.5.",
+      "icon": "ensemble"
     },
     {
       "name": "ens_detune",
@@ -362,7 +461,10 @@
       "max": 25,
       "kind": 0,
       "def": 7,
-      "value": 7
+      "value": 7,
+      "label": "Section detune",
+      "hover": "How far the extra players wander from the pitch. Range 0 to 25 cents.",
+      "icon": "ensemble+pitch"
     },
     {
       "name": "ens_spread",
@@ -371,7 +473,10 @@
       "max": 25,
       "kind": 0,
       "def": 18,
-      "value": 18
+      "value": 18,
+      "label": "Section spread",
+      "hover": "How far apart in time the extra players play. Range 2 to 25 ms.",
+      "icon": "ensemble+time"
     },
     {
       "name": "pizz",
@@ -380,7 +485,10 @@
       "max": 1,
       "kind": 2,
       "def": 0,
-      "value": 0
+      "value": 0,
+      "label": "Pizzicato",
+      "hover": "Plucked instead of bowed: on or off. Range off or on.",
+      "icon": "pluck"
     },
     {
       "name": "pizz_decay",
@@ -389,7 +497,10 @@
       "max": 5,
       "kind": 0,
       "def": 1,
-      "value": 1
+      "value": 1,
+      "label": "Pluck ring",
+      "hover": "How long a plucked note rings while held, measured on middle C. Range 0.1 to 5 s.",
+      "icon": "pluck+decay"
     },
     {
       "name": "pizz_bright",
@@ -398,7 +509,10 @@
       "max": 5,
       "kind": 0,
       "def": 1,
-      "value": 1
+      "value": 1,
+      "label": "Pluck sharpness",
+      "hover": "How sharp the pluck is: higher is brighter. Range 0.2 to 5.",
+      "icon": "pluck+bright"
     },
     {
       "name": "output",
@@ -407,7 +521,10 @@
       "max": 2,
       "kind": 0,
       "def": 1,
-      "value": 1
+      "value": 1,
+      "label": "Output",
+      "hover": "The output level after the engine: at 1 the engine's own level, 0 silent. Range 0 to 2.",
+      "icon": "level"
     }
   ],
   "mono": false

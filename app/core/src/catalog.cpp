@@ -53,9 +53,11 @@ const nsc_component* Catalog::load(const std::string& path, std::string* error) 
 }
 
 // a package's presets (its kind-3 sections, in tag order), each checked by the component's own
-// load_preset(); another engine's preset is listed as refused
+// load_preset(); another engine's preset is listed as refused. A file that is one of the engine's
+// factory presets (its title and every value: a package's image carries its presets/<id> files,
+// which its factory presets are compiled from) is listed once, as the factory preset.
 void Catalog::add_presets(Engine& e, const std::vector<std::pair<std::string, std::string>>& files) {
-	std::unique_ptr<Instance> scratch;
+	std::unique_ptr<Instance> scratch, factory;
 	for (const auto& [tag, text] : files) {
 		if (!scratch) {
 			scratch = std::make_unique<Instance>(*e.c);
@@ -75,6 +77,20 @@ void Catalog::add_presets(Engine& e, const std::vector<std::pair<std::string, st
 					if (v.type == Json::String) p.heroes.push_back(v.s);
 		}
 		if (p.name.empty()) p.name = tag;
+		bool listed = false;
+		for (const PresetEntry& q : e.presets) {
+			if (q.factory < 0 || q.name != p.name) continue;
+			if (!factory) {
+				factory = std::make_unique<Instance>(*e.c);
+				if (factory->init(48000) != 0) break;
+			}
+			e.c->set_preset(factory->state, q.factory);
+			bool same = true;
+			for (int i = 0; same && i < e.c->desc->num_params; i++) same = e.c->param(factory->state, i) == e.c->param(scratch->state, i);
+			listed = same;
+			if (listed) break;
+		}
+		if (listed) continue;
 		p.text = text;
 		e.presets.push_back(std::move(p));
 	}
@@ -144,9 +160,12 @@ void Catalog::add_package(Engine& e, const std::string& path, const std::vector<
 	for (const nscpkg::Section& s : secs)
 		if (s.kind == nscpkg::KIND_PRESET) presets.push_back({s.tag, std::string(bytes.data() + s.offset, s.size)});
 	std::sort(presets.begin(), presets.end());
-	if (!any_image) { // presets for a built-in engine
+	if (!any_image) { // presets for the built-in engine of its id (the pinned awva's), never another package's
 		for (const Engine& b : builtins)
-			if (b.ok && id == b.c->desc->id) e.c = b.c;
+			if (b.ok && b.key.rfind("builtin:", 0) == 0 && id == b.c->desc->id) {
+				e.c = b.c;
+				break;
+			}
 		if (!e.c) {
 			e.error = "presets for \"" + id + "\", which isn't a built-in engine";
 			return;

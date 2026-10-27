@@ -4,7 +4,7 @@
     "label": "built in",
     "id": "va",
     "title": "Virtual Analog",
-    "version": "ed4010d",
+    "version": "ff09ba9",
     "summary": "virtual analog: saw/pulse/sub oscillators, sync, ladder-style filter, envelopes (8 presets)",
     "builtin": true
   },
@@ -61,7 +61,10 @@
       "max": 5,
       "kind": 0,
       "def": 2.29999995,
-      "value": 3.5999999
+      "value": 3.5999999,
+      "label": "Level",
+      "hover": "The overall loudness of the sound. Range 0.5 to 5.",
+      "icon": "level"
     },
     {
       "name": "pres_lin",
@@ -70,7 +73,10 @@
       "max": 1,
       "kind": 0,
       "def": 0.300000012,
-      "value": 0.449999988
+      "value": 0.449999988,
+      "label": "Dynamics (even)",
+      "hover": "The even part of how pressure becomes loudness: more here and a light touch already speaks. Range 0 to 1.",
+      "icon": "dynamics+soft"
     },
     {
       "name": "pres_sq",
@@ -79,7 +85,10 @@
       "max": 1.5,
       "kind": 0,
       "def": 0.699999988,
-      "value": 0.550000012
+      "value": 0.550000012,
+      "label": "Dynamics (curved)",
+      "hover": "The curved part of how pressure becomes loudness: more here and the loud end opens up faster than the soft end. Range 0 to 1.5.",
+      "icon": "dynamics+loud"
     },
     {
       "name": "pres_hz",
@@ -88,7 +97,10 @@
       "max": 200,
       "kind": 0,
       "def": 70,
-      "value": 3
+      "value": 3,
+      "label": "Response",
+      "hover": "How quickly the sound follows a change of pressure: low is a slow swell, high is immediate. Range 1 to 200 Hz.",
+      "icon": "response"
     },
     {
       "name": "hold_decay",
@@ -97,7 +109,10 @@
       "max": 1,
       "kind": 0,
       "def": 0.0450000018,
-      "value": 0.349999994
+      "value": 0.349999994,
+      "label": "Fall while held",
+      "hover": "The fastest the level can fall while the key stays down, so a quick lift still leaves a tail. Range 0.005 to 1 s.",
+      "icon": "decay+hold"
     },
     {
       "name": "release",
@@ -106,7 +121,10 @@
       "max": 4,
       "kind": 0,
       "def": 0.100000001,
-      "value": 0.899999976
+      "value": 0.899999976,
+      "label": "Release",
+      "hover": "How long the sound takes to die away after the key is released. Range 0.02 to 4 s.",
+      "icon": "release"
     },
     {
       "name": "rel_pedal",
@@ -115,7 +133,10 @@
       "max": 6,
       "kind": 0,
       "def": 2.9000001,
-      "value": 3.5
+      "value": 3.5,
+      "label": "Release with pedal",
+      "hover": "How much longer the release gets with the sustain pedal down. Range 0 to 6 s.",
+      "icon": "release+pedal"
     },
     {
       "name": "rel_speed",
@@ -124,7 +145,10 @@
       "max": 8,
       "kind": 0,
       "def": 3,
-      "value": 1
+      "value": 1,
+      "label": "Release by lift speed",
+      "hover": "How much a quick lift-off shortens the tail: 0 no effect, higher cuts it short. Range 0 to 8.",
+      "icon": "release+lift"
     },
     {
       "name": "acc_level",
@@ -133,7 +157,10 @@
       "max": 2.5,
       "kind": 0,
       "def": 0.75,
-      "value": 0.119999997
+      "value": 0.119999997,
+      "label": "Accent",
+      "hover": "The extra push at the start of a struck note: 0 none, higher is a sharper attack. Range 0 to 2.5.",
+      "icon": "accent"
     },
     {
       "name": "acc_decay",
@@ -142,7 +169,10 @@
       "max": 0.400000006,
       "kind": 0,
       "def": 0.0399999991,
-      "value": 0.0799999982
+      "value": 0.0799999982,
+      "label": "Accent length",
+      "hover": "How long the accent lasts before the note settles. Range 0.005 to 0.4 s.",
+      "icon": "accent+time"
     },
     {
       "name": "acc_key",
@@ -151,7 +181,10 @@
       "max": 0.0599999987,
       "kind": 0,
       "def": 0.027777778,
-      "value": 0.027777778
+      "value": 0.027777778,
+      "label": "Accent by register",
+      "hover": "How much longer the accent lasts on low notes than on high ones. Range 0 to 0.06.",
+      "icon": "accent+register"
     },
     {
       "name": "acc_cutoff",
@@ -160,7 +193,10 @@
       "max": 48,
       "kind": 0,
       "def": 28,
-      "value": 8
+      "value": 8,
+      "label": "Accent cutoff",
+      "hover": "How far the filter opens at a strike, in semitones. Range 0 to 48 semitones.",
+      "icon": "accent+bright"
     },
     {
       "name": "acc_drive",
@@ -169,7 +205,10 @@
       "max": 2,
       "kind": 0,
       "def": 0.699999988,
-      "value": 0.200000003
+      "value": 0.200000003,
+      "label": "Accent drive",
+      "hover": "The extra saturation at a strike. Range 0 to 2.",
+      "icon": "accent+amount"
     },
     {
       "name": "acc_sync",
@@ -178,7 +217,10 @@
       "max": 24,
       "kind": 0,
       "def": 10,
-      "value": 10
+      "value": 10,
+      "label": "Accent sync",
+      "hover": "The extra sync sweep at a strike, in semitones, when timbre is up. Range 0 to 24 semitones.",
+      "icon": "accent+rate"
     },
     {
       "name": "acc_pitch",
@@ -187,7 +229,10 @@
       "max": 1,
       "kind": 0,
       "def": 0,
-      "value": 0
+      "value": 0,
+      "label": "Accent pitch",
+      "hover": "A pitch offset at the strike that fades with the accent: below 0 the note scoops up, above 0 it drops in. Range -1 to 1 semitones.",
+      "icon": "accent+pitch"
     },
     {
       "name": "cut_base",
@@ -196,7 +241,10 @@
       "max": 80,
       "kind": 0,
       "def": 26,
-      "value": 40
+      "value": 40,
+      "label": "Cutoff",
+      "hover": "Where the filter sits when closed, as a note number. Range -20 to 80 note.",
+      "icon": "filter"
     },
     {
       "name": "cut_key",
@@ -205,7 +253,10 @@
       "max": 1.20000005,
       "kind": 0,
       "def": 0.75,
-      "value": 0.600000024
+      "value": 0.600000024,
+      "label": "Cutoff tracking",
+      "hover": "How much the cutoff follows the note: 1 keeps the tone the same up the keyboard. Range 0 to 1.2.",
+      "icon": "filter+register"
     },
     {
       "name": "cut_env",
@@ -214,7 +265,10 @@
       "max": 80,
       "kind": 0,
       "def": 46,
-      "value": 34
+      "value": 34,
+      "label": "Cutoff by pressure",
+      "hover": "How far pressure opens the filter. Range 0 to 80 semitones.",
+      "icon": "filter+press"
     },
     {
       "name": "cut_back",
@@ -223,7 +277,10 @@
       "max": 24,
       "kind": 0,
       "def": 9,
-      "value": 6
+      "value": 6,
+      "label": "Cutoff, timbre down",
+      "hover": "How far the filter closes with timbre down. Range -24 to 24 semitones.",
+      "icon": "filter+back"
     },
     {
       "name": "cut_fwd",
@@ -232,7 +289,10 @@
       "max": 24,
       "kind": 0,
       "def": 5,
-      "value": 8
+      "value": 8,
+      "label": "Cutoff, timbre up",
+      "hover": "How far the filter opens with timbre up. Range -24 to 24 semitones.",
+      "icon": "filter+fwd"
     },
     {
       "name": "res",
@@ -241,7 +301,10 @@
       "max": 0.980000019,
       "kind": 0,
       "def": 0.200000003,
-      "value": 0.119999997
+      "value": 0.119999997,
+      "label": "Resonance",
+      "hover": "The filter's resonance: near 0.98 it rings on its own. Range 0 to 0.98.",
+      "icon": "resonance"
     },
     {
       "name": "res_back",
@@ -250,7 +313,10 @@
       "max": 0.980000019,
       "kind": 0,
       "def": 0.720000029,
-      "value": 0.449999988
+      "value": 0.449999988,
+      "label": "Resonance, timbre down",
+      "hover": "How much timbre down adds to the resonance. Range -0.5 to 0.98.",
+      "icon": "resonance+back"
     },
     {
       "name": "res_fwd",
@@ -259,7 +325,10 @@
       "max": 0.980000019,
       "kind": 0,
       "def": 0.0799999982,
-      "value": 0.0500000007
+      "value": 0.0500000007,
+      "label": "Resonance, timbre up",
+      "hover": "How much timbre up takes from the resonance. Range -0.5 to 0.98.",
+      "icon": "resonance+fwd"
     },
     {
       "name": "bass_comp",
@@ -268,7 +337,10 @@
       "max": 1,
       "kind": 0,
       "def": 0.449999988,
-      "value": 0.449999988
+      "value": 0.449999988,
+      "label": "Bass compensation",
+      "hover": "How much the bass is brought back as the resonance rises. Range 0 to 1.",
+      "icon": "filter+low"
     },
     {
       "name": "drive",
@@ -277,7 +349,10 @@
       "max": 3,
       "kind": 0,
       "def": 0.600000024,
-      "value": 0.449999988
+      "value": 0.449999988,
+      "label": "Drive",
+      "hover": "The saturation after the filter. Range 0.1 to 3.",
+      "icon": "drive"
     },
     {
       "name": "drive_env",
@@ -286,7 +361,10 @@
       "max": 3,
       "kind": 0,
       "def": 0.899999976,
-      "value": 0.5
+      "value": 0.5,
+      "label": "Drive by pressure",
+      "hover": "How much more saturation pressure adds. Range 0 to 3.",
+      "icon": "drive+press"
     },
     {
       "name": "saw",
@@ -295,7 +373,10 @@
       "max": 1,
       "kind": 0,
       "def": 0.5,
-      "value": 0.319999993
+      "value": 0.319999993,
+      "label": "Saw",
+      "hover": "The level of the main sawtooth. Range 0 to 1.",
+      "icon": "saw"
     },
     {
       "name": "saw_back",
@@ -304,7 +385,10 @@
       "max": 1,
       "kind": 0,
       "def": 0.75,
-      "value": 0.5
+      "value": 0.5,
+      "label": "Saw, timbre down",
+      "hover": "How much timbre down reduces the saw. Range 0 to 1.",
+      "icon": "saw+back"
     },
     {
       "name": "saw_fwd",
@@ -313,7 +397,10 @@
       "max": 1,
       "kind": 0,
       "def": 0.649999976,
-      "value": 0.300000012
+      "value": 0.300000012,
+      "label": "Saw, timbre up",
+      "hover": "How much timbre up reduces the saw. Range 0 to 1.",
+      "icon": "saw+fwd"
     },
     {
       "name": "saw2",
@@ -322,7 +409,10 @@
       "max": 1,
       "kind": 0,
       "def": 0.360000014,
-      "value": 0.300000012
+      "value": 0.300000012,
+      "label": "Second saw",
+      "hover": "The level of the detuned second sawtooth. Range 0 to 1.",
+      "icon": "saw+pitch"
     },
     {
       "name": "saw2_back",
@@ -331,7 +421,10 @@
       "max": 1,
       "kind": 0,
       "def": 0.5,
-      "value": 0.300000012
+      "value": 0.300000012,
+      "label": "Second saw, timbre down",
+      "hover": "How much timbre down reduces the second saw. Range 0 to 1.",
+      "icon": "saw+back"
     },
     {
       "name": "saw2_fwd",
@@ -340,7 +433,10 @@
       "max": 1,
       "kind": 0,
       "def": 0.600000024,
-      "value": 0.300000012
+      "value": 0.300000012,
+      "label": "Second saw, timbre up",
+      "hover": "How much timbre up reduces the second saw. Range 0 to 1.",
+      "icon": "saw+fwd"
     },
     {
       "name": "saw2_detune",
@@ -349,7 +445,10 @@
       "max": 0.5,
       "kind": 0,
       "def": 0.0700000003,
-      "value": 0.109999999
+      "value": 0.109999999,
+      "label": "Second saw detune",
+      "hover": "How far the second saw is detuned. Range -0.5 to 0.5 semitones.",
+      "icon": "detune"
     },
     {
       "name": "pulse",
@@ -358,7 +457,10 @@
       "max": 1,
       "kind": 0,
       "def": 0,
-      "value": 0.119999997
+      "value": 0.119999997,
+      "label": "Pulse",
+      "hover": "The level of the pulse wave. Range 0 to 1.",
+      "icon": "pulse"
     },
     {
       "name": "pulse_back",
@@ -367,7 +469,10 @@
       "max": 1,
       "kind": 0,
       "def": 0.449999988,
-      "value": 0.300000012
+      "value": 0.300000012,
+      "label": "Pulse, timbre down",
+      "hover": "How much timbre down adds pulse. Range 0 to 1.",
+      "icon": "pulse+back"
     },
     {
       "name": "pwm",
@@ -376,7 +481,10 @@
       "max": 0.400000006,
       "kind": 0,
       "def": 0.129999995,
-      "value": 0.200000003
+      "value": 0.200000003,
+      "label": "Pulse width sweep",
+      "hover": "How far the pulse width sweeps. Range 0 to 0.4.",
+      "icon": "pulse+depth"
     },
     {
       "name": "pwm_hz",
@@ -385,7 +493,10 @@
       "max": 8,
       "kind": 0,
       "def": 0.370000005,
-      "value": 0.5
+      "value": 0.5,
+      "label": "Pulse width rate",
+      "hover": "How fast the pulse width sweeps. Range 0.05 to 8 Hz.",
+      "icon": "pulse+rate"
     },
     {
       "name": "sub",
@@ -394,7 +505,10 @@
       "max": 1,
       "kind": 0,
       "def": 0.5,
-      "value": 0.5
+      "value": 0.5,
+      "label": "Sub",
+      "hover": "The level of the sub-oscillator an octave down. Range 0 to 1.",
+      "icon": "sub"
     },
     {
       "name": "sub_base",
@@ -403,7 +517,10 @@
       "max": 1,
       "kind": 0,
       "def": 0.200000003,
-      "value": 0.100000001
+      "value": 0.100000001,
+      "label": "Sub at rest",
+      "hover": "How much of the sub sounds with the timbre at rest. Range 0 to 1.",
+      "icon": "sub+amount"
     },
     {
       "name": "sub_back",
@@ -412,7 +529,10 @@
       "max": 1,
       "kind": 0,
       "def": 0.25,
-      "value": 0.25
+      "value": 0.25,
+      "label": "Sub, timbre down",
+      "hover": "How much timbre down adds sub. Range 0 to 1.",
+      "icon": "sub+back"
     },
     {
       "name": "sub_fwd",
@@ -421,7 +541,10 @@
       "max": 1,
       "kind": 0,
       "def": 0.600000024,
-      "value": 0.5
+      "value": 0.5,
+      "label": "Sub, timbre up",
+      "hover": "How much timbre up takes from the sub. Range 0 to 1.",
+      "icon": "sub+fwd"
     },
     {
       "name": "b_sync",
@@ -430,7 +553,10 @@
       "max": 1,
       "kind": 2,
       "def": 1,
-      "value": 0
+      "value": 0,
+      "label": "B synced",
+      "hover": "Whether the second oscillator is hard-synced to the first (on) or runs free and detuned (off). Range off or on.",
+      "icon": "sync"
     },
     {
       "name": "b_level",
@@ -439,7 +565,10 @@
       "max": 1,
       "kind": 0,
       "def": 0,
-      "value": 0.280000001
+      "value": 0.280000001,
+      "label": "B level",
+      "hover": "The level of the second oscillator. Range 0 to 1.",
+      "icon": "sync+level"
     },
     {
       "name": "b_fwd",
@@ -448,7 +577,10 @@
       "max": 1,
       "kind": 0,
       "def": 0.5,
-      "value": 0.100000001
+      "value": 0.100000001,
+      "label": "B, timbre up",
+      "hover": "How much timbre up adds of the second oscillator. Range 0 to 1.",
+      "icon": "sync+fwd"
     },
     {
       "name": "b_detune",
@@ -457,7 +589,10 @@
       "max": 0.5,
       "kind": 0,
       "def": 0,
-      "value": 0.100000001
+      "value": 0.100000001,
+      "label": "B detune",
+      "hover": "How far down the second oscillator is detuned when it runs free. Range -0.5 to 0.5 semitones.",
+      "icon": "sync+pitch"
     },
     {
       "name": "sync",
@@ -466,7 +601,10 @@
       "max": 24,
       "kind": 0,
       "def": 5,
-      "value": 5
+      "value": 5,
+      "label": "Sync ratio",
+      "hover": "How far above the note the synced oscillator runs, with timbre up. Range 0 to 24 semitones.",
+      "icon": "sync+rate"
     },
     {
       "name": "sync_fwd",
@@ -475,7 +613,10 @@
       "max": 24,
       "kind": 0,
       "def": 12,
-      "value": 12
+      "value": 12,
+      "label": "Sync, timbre up",
+      "hover": "How much further timbre up sweeps the sync. Range 0 to 24 semitones.",
+      "icon": "sync+fwd"
     },
     {
       "name": "sync_env",
@@ -484,7 +625,10 @@
       "max": 24,
       "kind": 0,
       "def": 9,
-      "value": 9
+      "value": 9,
+      "label": "Sync by pressure",
+      "hover": "How far pressure sweeps the sync. Range 0 to 24 semitones.",
+      "icon": "sync+press"
     },
     {
       "name": "tilt_home",
@@ -493,7 +637,10 @@
       "max": 1,
       "kind": 0,
       "def": 0,
-      "value": 0
+      "value": 0,
+      "label": "Timbre home",
+      "hover": "Where the timbre sits while the timbre control is centred: below 0 down, above 0 up. Range -1 to 1.",
+      "icon": "timbre"
     },
     {
       "name": "drift",
@@ -502,7 +649,10 @@
       "max": 0.300000012,
       "kind": 0,
       "def": 0.0299999993,
-      "value": 0.0500000007
+      "value": 0.0500000007,
+      "label": "Pitch drift",
+      "hover": "A slow wander of the main oscillator's pitch. Range 0 to 0.3 semitones.",
+      "icon": "drift"
     },
     {
       "name": "saw2_drift",
@@ -511,7 +661,10 @@
       "max": 0.300000012,
       "kind": 0,
       "def": 0.0250000004,
-      "value": 0.0399999991
+      "value": 0.0399999991,
+      "label": "Second saw drift",
+      "hover": "A slow wander of the second saw's pitch. Range 0 to 0.3 semitones.",
+      "icon": "drift+pitch"
     },
     {
       "name": "cut_drift",
@@ -520,7 +673,10 @@
       "max": 2,
       "kind": 0,
       "def": 0.300000012,
-      "value": 0.300000012
+      "value": 0.300000012,
+      "label": "Cutoff drift",
+      "hover": "A slow wander of the filter cutoff. Range 0 to 2 semitones.",
+      "icon": "drift+bright"
     },
     {
       "name": "gyro_chorus",
@@ -529,7 +685,10 @@
       "max": 1,
       "kind": 0,
       "def": 0.219999999,
-      "value": 0.349999994
+      "value": 0.349999994,
+      "label": "Chorus by rotation",
+      "hover": "How much rotation (the motion input) detunes the second saw. Range 0 to 1.",
+      "icon": "spin+pitch"
     },
     {
       "name": "vibrato",
@@ -538,7 +697,10 @@
       "max": 1.5,
       "kind": 0,
       "def": 0.349999994,
-      "value": 0.25
+      "value": 0.25,
+      "label": "Vibrato by shake",
+      "hover": "How much vibrato a shake (the motion input) adds, in semitones at a full shake. Range 0 to 1.5 semitones.",
+      "icon": "vibrato+shake"
     },
     {
       "name": "vib_hz",
@@ -547,7 +709,10 @@
       "max": 9,
       "kind": 0,
       "def": 5.30000019,
-      "value": 4.5999999
+      "value": 4.5999999,
+      "label": "Vibrato rate",
+      "hover": "How fast the vibrato wavers. Range 1 to 9 Hz.",
+      "icon": "vibrato+rate"
     },
     {
       "name": "life",
@@ -556,7 +721,10 @@
       "max": 1,
       "kind": 0,
       "def": 0,
-      "value": 0
+      "value": 0,
+      "label": "Life",
+      "hover": "Micro-randomness: 0 every note identical, 1 each one slightly different. Range 0 to 1.",
+      "icon": "life"
     },
     {
       "name": "output",
@@ -565,7 +733,10 @@
       "max": 2,
       "kind": 0,
       "def": 1,
-      "value": 1
+      "value": 1,
+      "label": "Output",
+      "hover": "The output level after the engine: at 1 the engine's own level, 0 silent. Range 0 to 2.",
+      "icon": "level"
     }
   ],
   "mono": false

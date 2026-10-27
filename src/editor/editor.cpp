@@ -6,6 +6,9 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <vector>
+
+#include "awva_plugin/param_icons.h"
 
 namespace awva_editor {
 
@@ -15,6 +18,7 @@ namespace {
 
 constexpr float kPi = 3.14159265358979f;
 constexpr float kStart = kPi * 0.75f, kSweep = kPi * 1.5f; // the knob's 270 degrees
+constexpr int kTipTicks = 10;                               // ticks (30 a second) the pointer rests before a tooltip
 
 std::string label_of(const char* name) {
 	std::string s = name ? name : "";
@@ -52,9 +56,103 @@ void theme_icon(Canvas& c, float cx, float cy, uint32_t col) {
 	for (float a = -kPi / 2; a < kPi / 2; a += kPi / 24) c.line(cx, cy, cx + std::cos(a) * r, cy + std::sin(a) * r, col, 1.4f);
 }
 
+// a text's words in lines no wider than w
+std::vector<std::string> wrap(Canvas& c, const std::string& s, const T::Type& t, float w) {
+	std::vector<std::string> lines;
+	std::string line;
+	size_t i = 0;
+	while (i < s.size()) {
+		const size_t j = s.find(' ', i);
+		const std::string word = s.substr(i, j == std::string::npos ? std::string::npos : j - i);
+		i = j == std::string::npos ? s.size() : j + 1;
+		const std::string next = line.empty() ? word : line + " " + word;
+		if (!line.empty() && c.text_width(next, t) > w) {
+			lines.push_back(line);
+			line = word;
+		} else {
+			line = next;
+		}
+	}
+	if (!line.empty()) lines.push_back(line);
+	return lines;
+}
+
+// one icon's shapes (param_icons.h) at x, y, k points a grid unit
+void draw_shapes(Canvas& c, const awva_icons::Icon& icon, float x, float y, float k, uint32_t col) {
+	const float* s = icon.shapes;
+	std::vector<float> pts;
+	for (int i = 0; i < icon.count;) {
+		const int kind = static_cast<int>(s[i]);
+		if (kind == 0) {
+			const int n = static_cast<int>(s[i + 1]);
+			pts.resize(static_cast<size_t>(2 * n));
+			for (int j = 0; j < n; j++) {
+				pts[static_cast<size_t>(2 * j)] = x + s[i + 2 + 2 * j] * k;
+				pts[static_cast<size_t>(2 * j + 1)] = y + s[i + 3 + 2 * j] * k;
+			}
+			c.polyline(pts.data(), n, col, 1.5f * k);
+			i += 2 + 2 * n;
+		} else {
+			if (kind == 1) c.arc(x + s[i + 1] * k, y + s[i + 2] * k, s[i + 3] * k, 0, 2 * kPi, col, 1.5f * k);
+			else c.disc(x + s[i + 1] * k, y + s[i + 2] * k, s[i + 3] * k, col);
+			i += 4;
+		}
+	}
+}
+
 } // namespace
 
 Editor::Editor(Host& host) : h_(host) {}
+
+// a parameter's icon ("concept" or "concept+modifier", awva docs/icons.md) in a size x size square:
+// the concept, then a knockout of the background at (19, 19) r 5.5 and the modifier; nothing for
+// none (an engine built without its text) or an unknown one
+void Editor::paint_icon(Canvas& c, const char* icon, float x, float y, float size, uint32_t fg, uint32_t bg) {
+	if (!icon || !*icon) return;
+	const char* plus = std::strchr(icon, '+');
+	const awva_icons::Icon* base = awva_icons::find(icon, plus ? static_cast<size_t>(plus - icon) : std::strlen(icon));
+	if (!base) return;
+	const float k = size / 24;
+	draw_shapes(c, *base, x, y, k, fg);
+	if (!plus) return;
+	const std::string mod = std::string("mod-") + (plus + 1);
+	if (const awva_icons::Icon* m = awva_icons::find(mod.c_str(), mod.size())) {
+		c.disc(x + 19 * k, y + 19 * k, 5.5f * k, bg);
+		draw_shapes(c, *m, x, y, k, fg);
+	}
+}
+
+// the tooltip of parameter tip_: its label (strong) and its hover text, under what it is about
+void Editor::paint_tip(Canvas& c) {
+	const nsc_desc& d = h_.desc();
+	if (tip_ < 0 || tip_ >= d.num_params) return;
+	const nsc_param& p = d.params[tip_];
+	const std::string label = p.label ? p.label : "", hover = p.hover ? p.hover : "";
+	if (label.empty() && hover.empty()) return;
+	const T::Colors& k = colors();
+	const float pad_x = 10, pad_y = T::s2, inner = T::tipWidth - 2 * pad_x;
+	std::vector<std::string> lines = wrap(c, hover, T::typeSmall, inner);
+	float tw = label.empty() ? 0 : std::min(inner, c.text_width(label, T::typeSmallStrong));
+	for (const std::string& l : lines) tw = std::max(tw, std::min(inner, c.text_width(l, T::typeSmall)));
+	const float lh = T::typeSmall.line;
+	const float bw = tw + 2 * pad_x + 1, bh = static_cast<float>(lines.size() + (label.empty() ? 0 : 1)) * lh + 2 * pad_y;
+	const float x = std::clamp(tip_anchor_.x, T::s2, std::max(T::s2, w_ - bw - T::s2));
+	float y = tip_anchor_.y + tip_anchor_.h + T::s2;
+	if (y + bh > h_px_ - T::s2) y = std::max(T::s2, tip_anchor_.y - bh - T::s2);
+	const Rect box = {x, y, bw, bh};
+	c.fill({box.x - 1, box.y + 3, box.w + 2, box.h + 2}, with_alpha(k.shadow, k.dark ? 0.35f : 0.10f), T::radiusSmall);
+	c.fill(box, k.bg1, T::radiusSmall);
+	c.stroke(box, k.hairline, 1, T::radiusSmall);
+	float ty = y + pad_y;
+	if (!label.empty()) {
+		c.text(label, {x + pad_x, ty, tw + 1, lh}, T::typeSmallStrong, k.text1, Align::Left);
+		ty += lh;
+	}
+	for (const std::string& l : lines) {
+		c.text(l, {x + pad_x, ty, tw + 1, lh}, T::typeSmall, k.text1, Align::Left);
+		ty += lh;
+	}
+}
 
 const T::Colors& Editor::colors() const {
 	const std::string t = h_.theme();
@@ -101,13 +199,29 @@ void Editor::paint_knob(Canvas& c, const Rect& r, int i, bool active) {
 	const float ang = kStart + kSweep * v, pr = rad - T::knobStroke - 3;
 	c.line(cx + std::cos(ang) * (pr - 7), cy + std::sin(ang) * (pr - 7), cx + std::cos(ang) * pr, cy + std::sin(ang) * pr, active ? k.text1 : k.text2, 2.5f);
 	c.text(format_value(h_.value(i), p), {cx - 30, cy - 9, 60, 18}, T::typeValue, active ? k.text1 : k.text2, Align::Center);
-	c.text(label_of(p.name), {r.x - 4, r.y + size + T::s1, r.w + 8, 18}, T::typeBody, k.text2, Align::Center);
+	paint_label(c, {r.x - 4, r.y + size + T::s1, r.w + 8, 18}, i);
+}
+
+// a hero's name under it, its icon before it, centred together
+void Editor::paint_label(Canvas& c, const Rect& r, int i) {
+	const T::Colors& k = colors();
+	const nsc_param& p = h_.desc().params[i];
+	const std::string name = label_of(p.name);
+	const bool icon = p.icon && *p.icon;
+	const float iw = icon ? T::iconSmall + 5 : 0;
+	const float tw = std::min(r.w - iw, c.text_width(name, T::typeBody));
+	const float x = r.x + (r.w - iw - tw) / 2;
+	if (icon) paint_icon(c, p.icon, x, r.y + (r.h - T::iconSmall) / 2, T::iconSmall, k.text2, k.bg0);
+	c.text(name, {x + iw, r.y, tw + 1, r.h}, T::typeBody, k.text2, Align::Left);
+	targets_.push_back({Hit::Param, r, i});
 }
 
 void Editor::paint_slider_row(Canvas& c, const Rect& r, int i) {
 	const T::Colors& k = colors();
 	const nsc_param& p = h_.desc().params[i];
-	c.text(label_of(p.name), {r.x, r.y, 180, r.h}, T::typeBody, k.text2, Align::Left);
+	paint_icon(c, p.icon, r.x, r.y + (r.h - T::iconRow) / 2, T::iconRow, k.text2, k.bg0);
+	c.text(label_of(p.name), {r.x + T::iconRow + 8, r.y, 180 - T::iconRow - 8, r.h}, T::typeBody, k.text2, Align::Left);
+	targets_.push_back({Hit::Param, {r.x, r.y, 180, r.h}, i});
 	const Rect s = {r.x + 180, r.y, r.w - 180 - 64, r.h};
 	const float y = r.y + r.h / 2;
 	if (p.kind == NSC_PARAM_TOGGLE) {
@@ -215,8 +329,8 @@ void Editor::paint(Canvas& c, float w, float h) {
 			const Rect sw = {cx + cell / 2 - 16, cy + T::knob / 2 - 9, 32, 18};
 			c.fill(sw, on ? k.sage : k.bg3, 9);
 			c.disc(on ? sw.x + 23 : sw.x + 9, sw.y + 9, 6, on ? k.onSage : k.text3);
-			c.text(label_of(d.params[i].name), {r.x - 4, r.y + T::knob + T::s1, r.w + 8, 18}, T::typeBody, k.text2, Align::Center);
-			targets_.push_back({Hit::Toggle, r, i});
+			paint_label(c, {r.x - 4, r.y + T::knob + T::s1, r.w + 8, 18}, i);
+			targets_.push_back({Hit::Toggle, {r.x, r.y, r.w, T::knob}, i});
 		} else {
 			paint_knob(c, r, i, drag_ == i || r.contains(hover_x_, hover_y_));
 			targets_.push_back({Hit::Knob, {r.x, r.y, r.w, T::knob}, i});
@@ -249,7 +363,8 @@ void Editor::paint(Canvas& c, float w, float h) {
 		y += T::s4;
 		c.text("play", {bx, y, rw, T::typeMicro.line}, T::typeMicro, k.text3, Align::Left);
 		y += T::typeMicro.line + T::s1;
-		c.text("mono", {bx, y, 180, T::row}, T::typeBody, k.text2, Align::Left);
+		paint_icon(c, "mono", bx, y + (T::row - T::iconRow) / 2, T::iconRow, k.text2, k.bg0);
+		c.text("mono", {bx + T::iconRow + 8, y, 180 - T::iconRow - 8, T::row}, T::typeBody, k.text2, Align::Left);
 		const Rect sw = {bx + 180, y + T::row / 2 - 9, 32, 18};
 		const bool on = h_.mono();
 		c.fill(sw, on ? k.sage : k.bg3, 9);
@@ -271,6 +386,12 @@ void Editor::paint(Canvas& c, float w, float h) {
 	c.text(std::string("awva ") + (d.version ? d.version : ""), {w / 2, fy, w / 2 - T::s4, T::footer}, T::typeSmall, k.text3, Align::Right);
 
 	if (menu_ && d.num_presets > 0) paint_menu(c);
+	else if (tip_ >= 0) {
+		// (laid out by this paint: the anchor is the parameter's name, under the knob or in the row)
+		for (const Target& t : targets_)
+			if (t.index == tip_ && t.kind == Hit::Param) tip_anchor_ = t.r;
+		paint_tip(c);
+	}
 
 	// what this paint showed
 	seen_.resize(static_cast<size_t>(d.num_params));
@@ -296,6 +417,8 @@ Editor::Target Editor::hit(float x, float y) const {
 
 bool Editor::mouse_down(float x, float y, bool, bool double_click) {
 	const Target t = hit(x, y);
+	tip_ = -1;
+	rest_ticks_ = -1000000; // (no tooltip until the pointer moves to another target)
 	const nsc_desc& d = h_.desc();
 	if (menu_) {
 		if (t.kind == Hit::MenuItem) h_.select_preset(t.index);
@@ -376,6 +499,13 @@ bool Editor::mouse_move(float x, float y) {
 	hover_x_ = x;
 	hover_y_ = y;
 	const Target after = hit(x, y);
+	if (before.kind != after.kind || before.index != after.index) {
+		rest_ticks_ = 0;
+		if (tip_ >= 0) {
+			tip_ = -1;
+			return true;
+		}
+	}
 	return before.kind != after.kind || before.index != after.index || menu_;
 }
 
@@ -402,6 +532,15 @@ bool Editor::wheel(float x, float y, float dy) {
 
 bool Editor::tick() {
 	const nsc_desc& d = h_.desc();
+	// a tooltip once the pointer has rested on a parameter (not while dragging or in the menu)
+	if (tip_ < 0 && drag_ < 0 && !menu_) {
+		const Target t = hit(hover_x_, hover_y_);
+		const bool param = t.index >= 0 && (t.kind == Hit::Knob || t.kind == Hit::Slider || t.kind == Hit::Toggle || t.kind == Hit::Param);
+		if (param && ++rest_ticks_ == kTipTicks) {
+			tip_ = t.index;
+			return true;
+		}
+	}
 	if (h_.preset() != seen_preset_ || h_.voices() != seen_voices_ || h_.mono() != seen_mono_ || colors().dark != seen_dark_) return true;
 	if (seen_.size() != static_cast<size_t>(d.num_params)) return true;
 	for (int i = 0; i < d.num_params; i++)

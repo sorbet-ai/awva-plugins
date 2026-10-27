@@ -74,8 +74,18 @@ DM Sans (bundled, OFL, variable), tabular figures everywhere.
   range that crosses zero), a short pointer at the value. The value sits inside it, the name under
   it (`_` shown as a space). Drag up or down (200 px for the whole range; Shift: 800 px), scroll
   (the wheel is the knob's alone: the page doesn't scroll under it), double click for the default. A toggle parameter is a switch instead of a knob.
-- **Slider row** (in "Every parameter"): name (180 px), a 4 px ribbon, the value (64 px, right).
-  Click or drag anywhere on the ribbon; double click for the default.
+- **Slider row** (in "Every parameter"): the parameter's icon (16 px) and name (180 px together), a
+  4 px ribbon, the value (64 px, right). Click or drag anywhere on the ribbon; double click for the
+  default.
+- **Parameter icon**: every parameter leads its name with its icon, the engine's (awva
+  `assets/icons`, `docs/icons.md`: a concept, or a concept with a modifier mark over a knockout of the
+  background): 14 px under a knob, 16 px in a row, in the name's colour (text2), 1.5 lines on the
+  24 grid with round ends and joins. `tool/gen_icons.dart` turns the pinned awva's SVGs into the
+  app's `lib/src/param_icons.g.dart` and the editor's `include/awva_plugin/param_icons.h` (a test
+  fails if either is stale), so both draw the same shapes. An engine without its text shows no icon.
+- **Parameter tooltip**: resting 350 ms on a knob, a switch or a row's name shows the parameter's
+  label (`small`, 600) and its hover text (`small`) under it: bg1, hairline, shadow, radiusSmall,
+  at most 300 px wide; it goes when the pointer leaves or presses.
 - **Level**: a 112 px ribbon with a round handle, -60 to +6 dB (double click: -18 dB), and under it
   two 2 px meter lines (L, R): blue, butter while the limiter works. The dB value beside it.
 - **Picker**: the title in `title`, a chevron; a fill on hover; it opens a menu under it.
@@ -158,5 +168,6 @@ the same in every host and installs nothing.
 | the sound | `editor_<engine>_light.png` | `editor_<engine>_dark.png` |
 | every parameter | `..._light_params.png` | `..._dark_params.png` |
 | the preset menu | `..._light_menu.png` | `..._dark_menu.png` |
+| a hero's tooltip | `..._light_tip.png` | `..._dark_tip.png` |
 
 (`build/editor_shots/`, by `ctest -R editor_shot`; a CI artifact.)

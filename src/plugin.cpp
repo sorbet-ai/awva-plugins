@@ -852,7 +852,9 @@ bool params_info(const clap_plugin* p, uint32_t index, clap_param_info* info) {
 	const nsc_param& d = s.d.params[i];
 	info->id = d.id;
 	info->flags = CLAP_PARAM_IS_AUTOMATABLE | (d.kind != NSC_PARAM_CONTINUOUS ? CLAP_PARAM_IS_STEPPED : 0);
-	std::snprintf(info->name, sizeof info->name, "%s", d.name);
+	// the label for people where the engine has one (its text; CLAP, VST3 and AU have no field for
+	// the hover text: the editor shows it), the name otherwise; the id stays the host's key
+	std::snprintf(info->name, sizeof info->name, "%s", d.label && *d.label ? d.label : d.name);
 	std::snprintf(info->module, sizeof info->module, "%s", d.group ? d.group : "");
 	info->min_value = d.min;
 	info->max_value = d.max;

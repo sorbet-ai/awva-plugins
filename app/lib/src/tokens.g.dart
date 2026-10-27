@@ -57,6 +57,9 @@ class _Sizes {
   static const double knobStroke = 5;
   static const double sliderStroke = 4;
   static const double meterStroke = 2;
+  static const double iconSmall = 14;
+  static const double iconRow = 16;
+  static const double tipWidth = 300;
 }
 
 class _TypeToken {
@@ -68,6 +71,7 @@ class _TypeToken {
 const _family = 'DM Sans';
 const _micro = _TypeToken(11, 14, 600, 0.6);
 const _small = _TypeToken(12, 16, 400, 0);
+const _smallStrong = _TypeToken(12, 16, 600, 0);
 const _body = _TypeToken(13, 18, 400, 0);
 const _bodyStrong = _TypeToken(13, 18, 500, 0);
 const _value = _TypeToken(12, 16, 500, 0);

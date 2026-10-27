@@ -6,7 +6,7 @@
 # or SHA-256 pinned below. Downloads are data: nothing here runs them; the build compiles the SDKs, and
 # tools/validate.sh runs the validators.
 #
-#   deps/awva-<commit>         sorbet-ai/awva at AWVA_COMMIT: dsp/ sdk/ component/ presets/ tools/harness/
+#   deps/awva-<commit>         sorbet-ai/awva at AWVA_COMMIT: dsp/ sdk/ component/ presets/ assets/ tools/harness/
 #                              third_party/doctest (from GitHub, or a local checkout: AWVA=<path>)  Apache-2.0
 #   deps/clap-1.2.10           free-audio/clap 1.2.10                                       MIT
 #   deps/vst3sdk-3.8.0         steinbergmedia/vst3sdk v3.8.0_build_66 (clap-wrapper 0.17.0's;
@@ -75,7 +75,7 @@ if [ ! -d "$D/awva-${A:0:7}" ]; then
     git init -q "$src"
     git -C "$src" fetch -q --depth 1 https://github.com/sorbet-ai/awva.git "$A"
   fi
-  git -C "$src" archive "$A" dsp sdk component presets tools/harness third_party/doctest LICENSE NOTICE PROVENANCE.md | tar -x -C "$D/awva-${A:0:7}.tmp"
+  git -C "$src" archive "$A" dsp sdk component presets assets tools/harness third_party/doctest LICENSE NOTICE PROVENANCE.md | tar -x -C "$D/awva-${A:0:7}.tmp"
   rm -rf "$D/awva-src.tmp"
   mv "$D/awva-${A:0:7}.tmp" "$D/awva-${A:0:7}"
 fi

@@ -262,7 +262,8 @@ public:
 		for (int i = 0; i < d.num_params; i++) {
 			const nsc_param& p = d.params[i];
 			s += std::string(i ? "," : "") + "{\"name\":" + jstr(p.name) + ",\"group\":" + jstr(p.group ? p.group : "") + ",\"min\":" + jnum(p.min) +
-			    ",\"max\":" + jnum(p.max) + ",\"kind\":" + std::to_string(p.kind) + ",\"def\":" + jnum(p.def) + ",\"value\":" + jnum(param(i)) + "}";
+			    ",\"max\":" + jnum(p.max) + ",\"kind\":" + std::to_string(p.kind) + ",\"def\":" + jnum(p.def) + ",\"value\":" + jnum(param(i)) +
+			    ",\"label\":" + jstr(p.label ? p.label : "") + ",\"hover\":" + jstr(p.hover ? p.hover : "") + ",\"icon\":" + jstr(p.icon ? p.icon : "") + "}";
 		}
 		s += "],\"mono\":" + std::string(mono_ ? "true" : "false") + "}";
 		return s;

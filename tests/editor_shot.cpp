@@ -5,11 +5,12 @@
 // editor in both themes, and a check that it paints with an engine's descriptor.
 //   editor_shot COMPONENT_LIB OUT_DIR
 // writes OUT_DIR/editor_<engine>_{light,dark}.png (760 x 480 points at 2x), the "Every parameter"
-// view and the preset menu.
+// view, the preset menu and the first hero's tooltip.
 #if defined(_WIN32) && !defined(NOMINMAX)
 #define NOMINMAX
 #endif
 #include <cstdio>
+#include <cstring>
 #include <string>
 
 #include "editor/view.h"
@@ -71,6 +72,10 @@ int main(int argc, char** argv) {
 		Editor menu(h); // the preset menu
 		menu.show_menu(true);
 		bad += !render_png(menu, 760, 480, 2.0f, base + "_menu.png");
+		Editor tip(h); // the first hero's tooltip: its icon, label and hover text
+		for (int i = 0; i < h.desc().num_params; i++)
+			if (h.desc().heroes[0] && !std::strcmp(h.desc().params[i].name, h.desc().heroes[0])) tip.show_tip(i);
+		bad += !render_png(tip, 760, 480, 2.0f, base + "_tip.png");
 		std::printf("editor_shot: %s\n", (base + ".png").c_str());
 	}
 	nsc_unload(&lib);

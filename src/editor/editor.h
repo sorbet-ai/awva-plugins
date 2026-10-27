@@ -8,7 +8,9 @@
 //
 //   header   the logo, the engine's title, the preset picker (previous, the name, next), the theme
 //   body     the sound's name, the engine's summary, the hero knobs four to a row, "Every parameter"
-//            (grouped slider rows, then mono); the body scrolls
+//            (grouped slider rows, then mono); the body scrolls. Each parameter shows its icon by its
+//            name (awva's assets/icons: param_icons.h), and its label and hover text as a tooltip
+//            when the pointer rests on it
 //   footer   the voices playing, mono
 //   menu     the presets, over the body
 #pragma once
@@ -37,6 +39,7 @@ struct Canvas {
 	virtual void line(float x0, float y0, float x1, float y1, uint32_t argb, float width) = 0;  // round ends
 	virtual void arc(float cx, float cy, float r, float from, float sweep, uint32_t argb, float width) = 0; // radians, clockwise from +x, round ends
 	virtual void disc(float cx, float cy, float r, uint32_t argb) = 0;
+	virtual void polyline(const float* xy, int n, uint32_t argb, float width) = 0; // n points (x, y), round ends and joins
 	virtual void text(const std::string& utf8, const Rect& r, const awva_tokens::Type& t, uint32_t argb, Align a) = 0; // one line, vertically centred, ellipsised
 	virtual float text_width(const std::string& utf8, const awva_tokens::Type& t) = 0;
 	virtual void logo(const Rect& r) = 0;
@@ -74,16 +77,18 @@ public:
 	bool mouse_up(float x, float y);
 	bool mouse_move(float x, float y);
 	bool wheel(float x, float y, float dy); // dy > 0: up / away
-	// 30 times a second: true when something it shows changed (a value, the preset, the voices)
+	// 30 times a second: true when something it shows changed (a value, the preset, the voices, a
+	// tooltip due)
 	bool tick();
 
 	const awva_tokens::Colors& colors() const;
 	// the views a click opens (also for the screenshots)
 	void show_all(bool on) { all_ = on; }
 	void show_menu(bool on) { menu_ = on; }
+	void show_tip(int index) { tip_ = index; } // a parameter's tooltip (-1 none; for the screenshots)
 
 private:
-	enum class Hit { None, Prev, Next, Preset, Theme, Knob, Toggle, All, Slider, Mono, MenuItem, Menu };
+	enum class Hit { None, Prev, Next, Preset, Theme, Knob, Toggle, All, Slider, Mono, MenuItem, Menu, Param }; // Param: a parameter's name (its tooltip)
 	struct Target {
 		Hit kind = Hit::None;
 		Rect r;
@@ -93,8 +98,11 @@ private:
 	std::vector<int> heroes() const;
 	void layout(float w, float h);
 	void paint_knob(Canvas& c, const Rect& r, int i, bool active);
+	void paint_label(Canvas& c, const Rect& r, int i);
 	void paint_slider_row(Canvas& c, const Rect& r, int i);
 	void paint_menu(Canvas& c);
+	void paint_icon(Canvas& c, const char* icon, float x, float y, float size, uint32_t fg, uint32_t bg);
+	void paint_tip(Canvas& c);
 	void set_norm(int i, float n);
 	float norm(int i) const;
 
@@ -111,6 +119,9 @@ private:
 	float drag_y_ = 0, drag_v_ = 0;
 	Rect drag_rect_;
 	float hover_x_ = -1, hover_y_ = -1;
+	int rest_ticks_ = 0;   // ticks the pointer has rested on the parameter under it
+	int tip_ = -1;         // the parameter whose tooltip shows (-1 none)
+	Rect tip_anchor_;      // what it is under
 	// what was last painted, to know when to paint again
 	std::vector<float> seen_;
 	int seen_preset_ = -2, seen_voices_ = -1;

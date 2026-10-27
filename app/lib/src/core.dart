@@ -37,8 +37,15 @@ class ParamInfo {
         max = (j['max'] as num).toDouble(),
         kind = j['kind'] as int,
         def = (j['def'] as num).toDouble(),
-        value = (j['value'] as num?)?.toDouble() ?? 0;
+        value = (j['value'] as num?)?.toDouble() ?? 0,
+        label = j['label'] as String? ?? '',
+        hover = j['hover'] as String? ?? '',
+        icon = j['icon'] as String? ?? '';
   final String name, group;
+
+  /// for people (the engine's: awva ParamDesc): a label, what it does, its icon ("concept+modifier");
+  /// empty from an engine built without its text
+  final String label, hover, icon;
   final double min, max, def;
   final int kind; // 0 continuous, 1 steps, 2 toggle
   double value;

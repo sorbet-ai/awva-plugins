@@ -51,8 +51,14 @@ class AwvaSize {
   static const double radiusSmall = _Sizes.radiusSmall, radius = _Sizes.radius, radiusLarge = _Sizes.radiusLarge;
   static const double knob = _Sizes.knob, knobStroke = _Sizes.knobStroke;
   static const double sliderStroke = _Sizes.sliderStroke, meterStroke = _Sizes.meterStroke;
+
+  /// a parameter's icon: by a knob's name, in a parameter's row; its tooltip's width
+  static const double iconSmall = _Sizes.iconSmall, iconRow = _Sizes.iconRow, tipWidth = _Sizes.tipWidth;
   static const Duration quick = Duration(milliseconds: 120);
   static const Duration open = Duration(milliseconds: 200);
+
+  /// how long the pointer rests on a parameter before its tooltip shows
+  static const Duration tipDelay = Duration(milliseconds: 350);
 }
 
 /// type: DM Sans (bundled, OFL), tabular figures everywhere
@@ -73,6 +79,9 @@ class AwvaType {
   /// group names, column labels: lower case, spaced
   static TextStyle micro(Color c) => _s(_micro, c);
   static TextStyle small(Color c) => _s(_small, c);
+
+  /// a tooltip's title
+  static TextStyle smallStrong(Color c) => _s(_smallStrong, c);
   static TextStyle body(Color c) => _s(_body, c);
   static TextStyle bodyStrong(Color c) => _s(_bodyStrong, c);
   static TextStyle title(Color c) => _s(_title, c);
