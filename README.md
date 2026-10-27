@@ -105,7 +105,7 @@ A state from another engine, or text that isn't a preset, is refused.
 You need CMake 3.25 or later, Ninja, Python 3, git and, for the validators, Rust 1.95 or later, plus one of:
 - **Windows:** Visual Studio 2022 (its libraries) and LLVM clang.
 - **macOS:** Xcode and Homebrew's cmake and ninja.
-- **Linux:** clang, pkg-config and the X11, cairo and FreeType headers (Ubuntu: `ninja-build clang pkg-config libx11-dev libcairo2-dev libfreetype-dev`; `xvfb` to run the proofs and pluginval without a display). The app's core isn't built on Linux yet (`-DAWVA_APP=OFF`).
+- **Linux:** clang, pkg-config and the X11, cairo and FreeType headers (Ubuntu: `ninja-build clang pkg-config libx11-dev libcairo2-dev libfreetype-dev`; `xvfb` to run the proofs and pluginval without a display).
 
 ```
 git clone --recurse-submodules https://github.com/sorbet-ai/awva-plugins.git

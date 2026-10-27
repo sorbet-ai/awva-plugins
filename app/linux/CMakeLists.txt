@@ -129,7 +129,7 @@ endif()
 
 # The awva core and the built-in engines, from the repository's own build (./build.sh build at the
 # root: build/app), the same toolchain as the plugins
-set(AWVA_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../build/app" CACHE PATH "the core's build: libawva_app_core.so, engines/")
+set(AWVA_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../build/app") # (the core's build: libawva_app_core.so, engines/)
 if(NOT EXISTS "${AWVA_CORE_DIR}/libawva_app_core.so")
   message(FATAL_ERROR "no awva core in ${AWVA_CORE_DIR}: build it first (./build.sh build at the repository's root)")
 endif()
