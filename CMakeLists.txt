@@ -4,7 +4,7 @@
 # The awva plugins: every awva engine component (awva/component, nsc.h) as a CLAP, and through
 # clap-wrapper (Sorbet AI's fork, the submodule third_party/clap-wrapper: docs/forked_dependencies.md)
 # as a VST3 (Windows, macOS) and an AUv2 (macOS), all from the one generic source
-# (src/plugin.cpp, which sees only nsc.h and CLAP). awva is the AWVA_COMMIT export in deps/ (fetch_deps.sh;
+# (src/plugin*.cpp, which see only nsc.h and CLAP). awva is the AWVA_COMMIT export in deps/ (fetch_deps.sh;
 # AWVA=<checkout> exports that checkout's commit): changing AWVA_COMMIT changes the tree a build uses.
 #
 #   awva_<engine>_impl     the generic plugin, with clap_entry, on the engine's component
@@ -87,7 +87,10 @@ else() # Linux: X11, cairo, FreeType
 endif()
 
 # --- the generic plugin: CLAP and nsc.h only, compiled once --------------------------------------------
-add_library(awva_plugin_core OBJECT src/plugin.cpp ${AWVA_EDITOR_SOURCES})
+add_library(awva_plugin_core OBJECT src/plugin.cpp src/plugin_events.cpp src/plugin_state.cpp src/plugin_audio.cpp
+  src/plugin_editor.cpp src/plugin_ports.cpp ${AWVA_EDITOR_SOURCES})
+# (only clap_entry leaves the module: the parts' names are the module's own)
+set_target_properties(awva_plugin_core PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
 target_link_libraries(awva_plugin_core PUBLIC ${AWVA_EDITOR_LIBS}) # (Linux: its headers too)
 target_include_directories(awva_plugin_core PUBLIC "${CLAP_SDK_ROOT}/include" "${AWVA_DIR}/component/include" include src
   "${CLAP_WRAPPER_DIR}/include") # (clapwrapper/auv2.h: the AU codes; clapwrapper/vst3.h)

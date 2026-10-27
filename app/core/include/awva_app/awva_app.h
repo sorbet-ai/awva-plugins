@@ -6,7 +6,7 @@
  *
  *   engines   the built-in engines (nsc components beside the core) and the user's packages
  *             (.awvapkg files, awva-package/2, app/README.md), listed by awva_catalog()
- *   the sound one engine instance, driven as the plugins drive theirs (plugin.cpp): UMP in at
+ *   the sound one engine instance, driven as the plugins drive theirs (src/plugin*.cpp): UMP in at
  *             integer frames, 32-frame blocks, at unity (awva's output is nominal +-1), subnormals flushed
  *   MIDI in   every input port, MIDI 1.0 and MPE as MIDI 1.0 in UMP (the component up-converts),
  *             MIDI 2.0 UMP where the OS gives it (CoreMIDI)

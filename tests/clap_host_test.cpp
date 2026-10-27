@@ -22,7 +22,7 @@
 //     A MIDI 2.0 performance (MIDI2 dialect) and a MIDI 1.0 one (MIDI dialect), polyphonic and
 //     mono, in host blocks of 256, 1, 33 and random sizes at 48 and 44.1 kHz, against the engine's
 //     own component library given the same UMP at the same frames, block by block: bit for bit
-//     (an event after its block was rendered goes to the next as a late event: plugin.cpp).
+//     (an event after its block was rendered goes to the next as a late event: plugin_audio.cpp).
 //   clap_host_test notes PLUGIN.clap
 //     (and:) 20 overlapping CLAP notes on 20 keys, each with its own brightness: every one sounds
 //     (without it the output differs), every one's brightness is its own (changing it changes the

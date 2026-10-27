@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Sorbet AI
 // SPDX-License-Identifier: Apache-2.0
 //
-// One engine instance, driven exactly as the plugins drive theirs (src/plugin.cpp): UMP events
+// One engine instance, driven exactly as the plugins drive theirs (src/plugin*.cpp): UMP events
 // queued at absolute frames, a 32-frame block rendered when its first frame is due with every event
 // of its frames (an event whose block was already rendered goes to the next block at its negative
 // frame: a late event, nsc.h), at unity (awva's output is nominal +-1), subnormals flushed. So the app
