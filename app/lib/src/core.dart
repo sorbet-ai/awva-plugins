@@ -19,12 +19,10 @@ class EngineInfo {
         id = j['id'] as String,
         title = j['title'] as String,
         version = j['version'] as String,
-        summary = j['summary'] as String,
-        colour = j['colour'] as String,
         ok = j['ok'] as bool,
         error = j['error'] as String,
         refused = (j['refused'] as List).cast<String>();
-  final String key, label, source, id, title, version, summary, colour, error;
+  final String key, label, source, id, title, version, error;
   final bool builtin, ok;
   final List<String> refused;
 }
@@ -106,21 +104,15 @@ class AudioInfo {
         exclusiveAvailable = j['exclusive_available'] as bool? ?? false,
         volume = (j['volume'] as num?)?.toDouble() ?? -1,
         bus = j['bus'] as String? ?? 'other',
-        learned = j['learned'] as int? ?? 0,
         chosen = j['chosen'] as String? ?? '',
-        missing = j['missing'] as bool? ?? false,
         notice = j['notice'] as String? ?? '';
   final String backend, device, state, message;
 
-  /// the output asked for ('' the system's default); missing: it isn't there, the default plays, and
-  /// notice says so
+  /// the output asked for ('' the system's default); notice: the line that says it isn't there
   final String chosen, notice;
-  final bool missing;
 
-  /// the endpoint's bus ("bluetooth", "usb", "other"), and the exclusive buffer the app learned it
-  /// sustains (frames; -1 shared only; 0 none): a Bluetooth endpoint's buffer is the app's choice
+  /// the endpoint's bus ("bluetooth", "usb", "other")
   final String bus;
-  final int learned;
 
   /// what plays ("shared", "exclusive", "null") and what was asked for
   final String mode, wanted;
@@ -145,11 +137,7 @@ class OutputDeviceInfo {
 /// the delay from a key to the output, part by part (awva_latency)
 class LatencyInfo {
   LatencyInfo(Map<String, dynamic> j)
-      : mode = j['mode'] as String? ?? '',
-        rate = j['rate'] as int? ?? 0,
-        periodFrames = j['period_frames'] as int? ?? 0,
-        periodMs = _d(j['period_ms']),
-        bufferFrames = j['buffer_frames'] as int? ?? 0,
+      : bufferFrames = j['buffer_frames'] as int? ?? 0,
         bufferMs = _d(j['buffer_ms']),
         streamMs = _d(j['stream_ms'], -1),
         blockFrames = j['block_frames'] as int? ?? 32,
@@ -163,13 +151,12 @@ class LatencyInfo {
         glitches = j['glitches'] as int? ?? 0,
         recoveries = j['recoveries'] as int? ?? 0;
   static double _d(Object? v, [double def = 0]) => (v as num?)?.toDouble() ?? def;
-  final String mode;
-  final int rate, periodFrames, bufferFrames, blockFrames, midiCount;
+  final int bufferFrames, blockFrames, midiCount;
 
   /// glitches the audio thread saw (late wake-ups, slow renders, stalls) and the streams it opened
   /// again by itself
   final int glitches, recoveries;
-  final double periodMs, bufferMs, streamMs, blockMs, stepMs, midiMin, midiMean, midiMax, totalMs;
+  final double bufferMs, streamMs, blockMs, stepMs, midiMin, midiMean, midiMax, totalMs;
 }
 
 class Status {

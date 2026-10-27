@@ -43,11 +43,6 @@
 using namespace awva_app;
 
 static bool nsc_load_check(const std::string& path, nsc_library* out) { return nsc_load(path.c_str(), out) == 0; }
-static std::string read_back(const std::string& path) {
-	std::string s;
-	read_file(path, &s);
-	return s;
-}
 static void remove_all(const std::string& path) {
 	std::error_code ec;
 	std::filesystem::remove_all(std::filesystem::u8path(path), ec);
