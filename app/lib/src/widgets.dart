@@ -29,6 +29,115 @@ void claimWheel(PointerSignalEvent e, void Function(double dy) onWheel) {
   GestureBinding.instance.pointerSignalResolver.register(e, (s) => onWheel((s as PointerScrollEvent).scrollDelta.dy));
 }
 
+// --- keyboard focus ------------------------------------------------------------------------------
+
+/// A control in the Tab order: Enter or Space presses it ([onPress]), the arrow keys turn it
+/// ([onArrow]: +1 up or right, -1 down or left; Shift: fine, the second argument), Home, End and
+/// Delete ([onHome], [onEnd], [onReset]). While it has the keyboard's focus a sage ring (the
+/// selection's colour) sits 2 px outside it. A disabled control ([enabled] false) is skipped.
+class AwvaFocus extends StatefulWidget {
+  const AwvaFocus({
+    super.key,
+    required this.child,
+    this.onPress,
+    this.onArrow,
+    this.onHome,
+    this.onEnd,
+    this.onReset,
+    this.enabled = true,
+    this.radius = AwvaSize.radiusSmall,
+    this.label,
+  });
+  final Widget child;
+  final VoidCallback? onPress, onHome, onEnd, onReset;
+  final void Function(int dir, bool fine)? onArrow;
+  final bool enabled;
+  final double radius;
+
+  /// the focus node's name (the tests walk the Tab order by it)
+  final String? label;
+
+  @override
+  State<AwvaFocus> createState() => _AwvaFocusState();
+}
+
+class _AwvaFocusState extends State<AwvaFocus> {
+  bool _focus = false;
+
+  KeyEventResult _key(FocusNode n, KeyEvent e) {
+    if (e is KeyUpEvent) return KeyEventResult.ignored;
+    final k = e.logicalKey;
+    final fine = HardwareKeyboard.instance.isShiftPressed;
+    if (widget.onPress != null && e is KeyDownEvent && (k == LogicalKeyboardKey.enter || k == LogicalKeyboardKey.numpadEnter || k == LogicalKeyboardKey.space)) {
+      widget.onPress!();
+      return KeyEventResult.handled;
+    }
+    if (widget.onArrow != null) {
+      if (k == LogicalKeyboardKey.arrowUp || k == LogicalKeyboardKey.arrowRight) {
+        widget.onArrow!(1, fine);
+        return KeyEventResult.handled;
+      }
+      if (k == LogicalKeyboardKey.arrowDown || k == LogicalKeyboardKey.arrowLeft) {
+        widget.onArrow!(-1, fine);
+        return KeyEventResult.handled;
+      }
+    }
+    if (widget.onHome != null && k == LogicalKeyboardKey.home) {
+      widget.onHome!();
+      return KeyEventResult.handled;
+    }
+    if (widget.onEnd != null && k == LogicalKeyboardKey.end) {
+      widget.onEnd!();
+      return KeyEventResult.handled;
+    }
+    if (widget.onReset != null && (k == LogicalKeyboardKey.delete || k == LogicalKeyboardKey.backspace)) {
+      widget.onReset!();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = AwvaTheme.of(context);
+    return Focus(
+      debugLabel: widget.label,
+      canRequestFocus: widget.enabled,
+      skipTraversal: !widget.enabled,
+      onKeyEvent: _key,
+      onFocusChange: (f) => setState(() => _focus = f),
+      child: _focus
+          ? DecoratedBox(position: DecorationPosition.foreground, decoration: _FocusRing(c.sage, widget.radius), child: widget.child)
+          : widget.child,
+    );
+  }
+}
+
+/// the ring: 1.5 px sage, 2 px outside the control's box
+class _FocusRing extends Decoration {
+  const _FocusRing(this.color, this.radius);
+  final Color color;
+  final double radius;
+  @override
+  BoxPainter createBoxPainter([VoidCallback? onChanged]) => _FocusRingPainter(color, radius);
+}
+
+class _FocusRingPainter extends BoxPainter {
+  _FocusRingPainter(this.color, this.radius);
+  final Color color;
+  final double radius;
+  @override
+  void paint(Canvas canvas, Offset offset, ImageConfiguration cfg) {
+    final r = (offset & (cfg.size ?? Size.zero)).inflate(2);
+    canvas.drawRRect(
+        RRect.fromRectAndRadius(r, Radius.circular(radius + 2)),
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5
+          ..color = color);
+  }
+}
+
 // --- the knob ------------------------------------------------------------------------------------
 
 /// A value as a ribbon arc (270 degrees, round caps): drag up or down (shift: fine), scroll, double
@@ -77,15 +186,23 @@ class _KnobState extends State<Knob> {
     final c = AwvaTheme.of(context);
     final active = _drag || _hover;
     final text = formatValue(widget.value, widget.min, widget.max, widget.kind);
+    final step = widget.kind != 0 ? 1.0 : _span / 100;
     return ParamTip(
       label: widget.title,
       hover: widget.hover,
-      child: MouseRegion(
+      child: AwvaFocus(
+        label: 'knob ${widget.label}',
+        radius: widget.size / 2,
+        onArrow: (dir, fine) => _set(widget.value + dir * (fine && widget.kind == 0 ? step / 10 : step)),
+        onHome: () => _set(widget.min),
+        onEnd: () => _set(widget.max),
+        onReset: () => _set(widget.def),
+        child: MouseRegion(
         cursor: SystemMouseCursors.resizeUpDown,
         onEnter: (_) => setState(() => _hover = true),
         onExit: (_) => setState(() => _hover = false),
         child: Listener(
-          onPointerSignal: (e) => claimWheel(e, (dy) => _set(widget.value - dy.sign * (widget.kind != 0 ? 1.0 : _span / 100))),
+          onPointerSignal: (e) => claimWheel(e, (dy) => _set(widget.value - dy.sign * step)),
           child: GestureDetector(
             onDoubleTap: () => _set(widget.def),
             onVerticalDragStart: (_) => setState(() {
@@ -120,6 +237,7 @@ class _KnobState extends State<Knob> {
               ]),
             ),
           ),
+        ),
         ),
       ),
     );
@@ -190,7 +308,13 @@ class LevelControl extends StatelessWidget {
     final c = AwvaTheme.of(context);
     void at(double x) => onChanged((minDb + (x / width).clamp(0.0, 1.0) * (maxDb - minDb)).roundToDouble());
     return Row(mainAxisSize: MainAxisSize.min, children: [
-      MouseRegion(
+      AwvaFocus(
+        label: 'level',
+        onArrow: (dir, _) => onChanged((db + dir).clamp(minDb, maxDb)),
+        onHome: () => onChanged(minDb),
+        onEnd: () => onChanged(maxDb),
+        onReset: () => onChanged(-18),
+        child: MouseRegion(
         cursor: SystemMouseCursors.resizeLeftRight,
         child: Listener(
           onPointerSignal: (e) => claimWheel(e, (dy) => onChanged((db - dy.sign).clamp(minDb, maxDb))),
@@ -214,6 +338,7 @@ class LevelControl extends StatelessWidget {
               ),
             ),
           ),
+        ),
         ),
       ),
       const SizedBox(width: AwvaSize.s2),
@@ -288,13 +413,18 @@ class _AwvaButtonState extends State<AwvaButton> {
         if (widget.label != null) Text(widget.label!, style: AwvaType.bodyStrong(fg)),
       ]),
     );
-    child = MouseRegion(
-      cursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: GestureDetector(onTap: widget.onTap, child: child),
+    child = AwvaFocus(
+      label: widget.tooltip ?? widget.label,
+      enabled: enabled,
+      onPress: widget.onTap,
+      child: MouseRegion(
+        cursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        child: GestureDetector(onTap: widget.onTap, child: child),
+      ),
     );
-    return Semantics(button: true, label: widget.tooltip ?? widget.label, child: child);
+    return Semantics(button: true, enabled: enabled, label: widget.tooltip ?? widget.label, child: child);
   }
 }
 
@@ -307,7 +437,11 @@ class AwvaSwitch extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = AwvaTheme.of(context);
-    return MouseRegion(
+    return AwvaFocus(
+      label: 'switch',
+      radius: 9,
+      onPress: () => onChanged(!value),
+      child: MouseRegion(
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
         onTap: () => onChanged(!value),
@@ -320,6 +454,7 @@ class AwvaSwitch extends StatelessWidget {
           decoration: BoxDecoration(color: value ? c.sage : c.bg3, borderRadius: BorderRadius.circular(9)),
           child: Container(width: 12, height: 12, decoration: BoxDecoration(color: value ? c.onSage : c.text3, shape: BoxShape.circle)),
         ),
+      ),
       ),
     );
   }
@@ -441,11 +576,18 @@ class _MenuRowState extends State<_MenuRow> {
             SizedBox(width: 14, child: it.selected ? Padding(padding: const EdgeInsets.only(top: 5), child: Dot(c.sage, size: 6)) : null),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(it.title, style: AwvaType.body(it.enabled ? (it.selected ? c.text1 : c.text1) : c.text3)),
+                Text(it.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: AwvaType.body(it.enabled ? c.text1 : c.text3)),
                 if (it.detail.isNotEmpty) Text(it.detail, style: AwvaType.small(it.enabled ? c.text3 : c.error)),
               ]),
             ),
-            if (it.trailing.isNotEmpty) Padding(padding: const EdgeInsets.only(left: 8), child: Text(it.trailing, style: AwvaType.small(c.text3))),
+            if (it.trailing.isNotEmpty)
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 120),
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  child: Text(it.trailing, maxLines: 1, overflow: TextOverflow.ellipsis, style: AwvaType.small(c.text3)),
+                ),
+              ),
           ]),
         ),
       ),

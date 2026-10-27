@@ -5,6 +5,8 @@
 // level, the theme, settings), the sound (its name and its hero knobs, every parameter below on
 // request), the footer (audio and MIDI in one line), and the settings panel over the right edge.
 // The same screen is the plugins' editor, without the engine picker and the device settings.
+import 'dart:math' as math;
+
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -69,6 +71,7 @@ class _MainScreenState extends State<MainScreen> {
       bindings: {
         const SingleActivator(LogicalKeyboardKey.keyR, control: true): k.rescan,
         const SingleActivator(LogicalKeyboardKey.keyR, meta: true): k.rescan,
+        if (_settings) const SingleActivator(LogicalKeyboardKey.escape): () => setState(() => _settings = false),
       },
       child: Focus(autofocus: true, child: _screen(c)),
     );
@@ -123,13 +126,24 @@ class _Header extends StatelessWidget {
     return Container(
       height: AwvaSize.header,
       padding: const EdgeInsets.symmetric(horizontal: AwvaSize.s4),
-      child: Row(children: [
+      child: LayoutBuilder(builder: (context, box) {
+        // a narrow window (the 720 minimum): the pickers give way first, never the level and the
+        // buttons; the MIDI word goes, its dot stays
+        final narrow = box.maxWidth < 900;
+        // what the rest of the row takes (the logo, 22 px high and 98 wide; the arrows, MIDI, the
+        // level, two buttons and the gaps); the pickers share what is left, the engine's (a title
+        // and maybe a chip) three fifths of it, each 240 px at most
+        final rest = 98 + 2 * (narrow ? AwvaSize.s3 : AwvaSize.s5) + AwvaSize.s2 + 64 + (narrow ? 8 : 50) + 172 + AwvaSize.s3 + 64 + 16;
+        final left = (box.maxWidth - rest).clamp(144.0, double.infinity);
+        final pickEngine = (left * 0.6).clamp(72.0, 240.0), pickPreset = (left * 0.4).clamp(72.0, 240.0);
+        return Row(children: [
         Image.asset('assets/logo/awva.png', height: 22, filterQuality: FilterQuality.medium),
-        const SizedBox(width: AwvaSize.s5),
+        SizedBox(width: narrow ? AwvaSize.s3 : AwvaSize.s5),
         Builder(
           builder: (anchor) => _Picker(
             title: s?.engineTitle ?? 'No engine',
             detail: s == null || s.engineBuiltin ? null : s.engineLabel,
+            maxWidth: pickEngine,
             onTap: () => _engineMenu(anchor),
           ),
         ),
@@ -138,6 +152,7 @@ class _Header extends StatelessWidget {
         Builder(
           builder: (anchor) => _Picker(
             title: s == null ? '' : (s.presets.isEmpty ? 'Default' : s.presetName),
+            maxWidth: pickPreset,
             onTap: s == null || s.presets.isEmpty ? null : () => _presetMenu(anchor),
           ),
         ),
@@ -147,11 +162,10 @@ class _Header extends StatelessWidget {
           valueListenable: k.midiActive,
           builder: (_, on, _) => Row(children: [
             Dot(on ? c.blue : (k.ports.any((p) => p.state == 'open') ? c.text3 : c.bg3)),
-            const SizedBox(width: 6),
-            Text('MIDI', style: AwvaType.small(c.text2)),
+            if (!narrow) ...[const SizedBox(width: 6), Text('MIDI', style: AwvaType.small(c.text2))],
           ]),
         ),
-        const SizedBox(width: AwvaSize.s5),
+        SizedBox(width: narrow ? AwvaSize.s3 : AwvaSize.s5),
         ValueListenableBuilder<Status>(
           valueListenable: k.status,
           builder: (_, st, _) => LevelControl(
@@ -173,7 +187,8 @@ class _Header extends StatelessWidget {
           tooltip: 'light or dark',
         ),
         AwvaButton(onTap: onSettings, icon: Icons.settings, tooltip: 'settings'),
-      ]),
+      ]);
+      }),
     );
   }
 
@@ -219,11 +234,17 @@ class _Header extends StatelessWidget {
   }
 }
 
+double _textWidth(String s, TextStyle style) =>
+    (TextPainter(text: TextSpan(text: s, style: style), maxLines: 1, textDirection: TextDirection.ltr)..layout()).width;
+
 class _Picker extends StatefulWidget {
-  const _Picker({required this.title, this.detail, required this.onTap});
+  const _Picker({required this.title, this.detail, required this.onTap, this.maxWidth = 260});
   final String title;
   final String? detail;
   final VoidCallback? onTap;
+
+  /// the whole picker's width at most: its title ellipsizes (and then its chip)
+  final double maxWidth;
   @override
   State<_Picker> createState() => _PickerState();
 }
@@ -233,7 +254,16 @@ class _PickerState extends State<_Picker> {
   @override
   Widget build(BuildContext context) {
     final c = AwvaTheme.of(context);
-    return MouseRegion(
+    // the room inside (the padding, the chevron): the chip its text's width up to 45 % of it, the
+    // title the rest, 220 at most
+    final inner = widget.maxWidth - 20 - (widget.onTap != null ? 20 : 0);
+    final chipMax = widget.detail == null ? 0.0 : math.min(_textWidth(widget.detail!, AwvaType.small(c.butter)) + 12, inner * 0.45);
+    final titleMax = math.min(220.0, inner - (widget.detail == null ? 0 : chipMax + 8)).clamp(24.0, 220.0);
+    return AwvaFocus(
+      label: widget.title,
+      enabled: widget.onTap != null,
+      onPress: widget.onTap,
+      child: MouseRegion(
       cursor: widget.onTap != null ? SystemMouseCursors.click : SystemMouseCursors.basic,
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
@@ -242,24 +272,27 @@ class _PickerState extends State<_Picker> {
         child: AnimatedContainer(
           duration: AwvaSize.quick,
           height: 34,
+          constraints: BoxConstraints(maxWidth: widget.maxWidth),
           padding: const EdgeInsets.symmetric(horizontal: 10),
           decoration: BoxDecoration(color: _hover && widget.onTap != null ? c.bg2 : null, borderRadius: BorderRadius.circular(AwvaSize.radiusSmall)),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
             ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 220),
+              constraints: BoxConstraints(maxWidth: titleMax),
               child: Text(widget.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: AwvaType.title(c.text1)),
             ),
             if (widget.detail != null) ...[
               const SizedBox(width: 8),
               Container(
+                constraints: BoxConstraints(maxWidth: chipMax),
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                 decoration: BoxDecoration(color: c.butter.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(4)),
-                child: Text(widget.detail!, style: AwvaType.small(c.butter)),
+                child: Text(widget.detail!, maxLines: 1, overflow: TextOverflow.ellipsis, style: AwvaType.small(c.butter)),
               ),
             ],
             if (widget.onTap != null) ...[const SizedBox(width: 4), AwvaIcon(Icons.chevronDown, color: c.text3)],
           ]),
         ),
+      ),
       ),
     );
   }
@@ -287,7 +320,7 @@ class _Body extends StatelessWidget {
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 4 * (AwvaSize.knob + 24) + 3 * AwvaSize.s6 + 120),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(s.presets.isEmpty ? s.engineTitle : s.presetName, style: AwvaType.sound(c.text1)),
+            Text(s.presets.isEmpty ? s.engineTitle : s.presetName, maxLines: 1, overflow: TextOverflow.ellipsis, style: AwvaType.sound(c.text1)),
             const SizedBox(height: AwvaSize.s1),
             Text(s.engineSummary, maxLines: 2, style: AwvaType.body(c.text2)),
             if (k.message != null) ...[
@@ -328,15 +361,19 @@ class _Body extends StatelessWidget {
               ],
             ),
             const SizedBox(height: AwvaSize.s6),
-            GestureDetector(
-              onTap: onAll,
-              child: MouseRegion(
-                cursor: SystemMouseCursors.click,
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Text('Every parameter', style: AwvaType.bodyStrong(c.text2)),
-                  const SizedBox(width: 4),
-                  Transform.rotate(angle: all ? 0 : -1.5708, child: AwvaIcon(Icons.chevronDown, color: c.text3)),
-                ]),
+            AwvaFocus(
+              label: 'every parameter',
+              onPress: onAll,
+              child: GestureDetector(
+                onTap: onAll,
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Text('Every parameter', style: AwvaType.bodyStrong(c.text2)),
+                    const SizedBox(width: 4),
+                    Transform.rotate(angle: all ? 0 : -1.5708, child: AwvaIcon(Icons.chevronDown, color: c.text3)),
+                  ]),
+                ),
               ),
             ),
             if (all) ...[const SizedBox(height: AwvaSize.s3), _AllParams(k: k, s: s)],
@@ -453,7 +490,15 @@ class _ParamRow extends StatelessWidget {
                 onChanged(v);
               }
 
-              return MouseRegion(
+              final step = p.kind != 0 ? 1.0 : span / 100;
+              return AwvaFocus(
+                label: 'row ${p.name}',
+                radius: AwvaSize.row / 2,
+                onArrow: (dir, fine) => onChanged((p.value + dir * (fine && p.kind == 0 ? step / 10 : step)).clamp(p.min, p.max)),
+                onHome: () => onChanged(p.min),
+                onEnd: () => onChanged(p.max),
+                onReset: () => onChanged(p.def),
+                child: MouseRegion(
                 cursor: SystemMouseCursors.resizeLeftRight,
                 child: GestureDetector(
                   onDoubleTap: () => onChanged(p.def),
@@ -463,6 +508,7 @@ class _ParamRow extends StatelessWidget {
                     height: AwvaSize.row,
                     child: CustomPaint(painter: _RibbonPainter(v: norm(p.value), from: p.min < 0 && p.max > 0 ? norm(0) : 0, track: c.bg3, fill: c.sage)),
                   ),
+                ),
                 ),
               );
             }),
@@ -653,7 +699,7 @@ class _Settings extends StatelessWidget {
             ),
           head('play'),
           Row(children: [
-            Expanded(child: Text('Mono', style: AwvaType.body(c.text1))),
+            Expanded(child: Text('mono', style: AwvaType.body(c.text1))),
             AwvaSwitch(value: k.sound?.mono ?? false, onChanged: k.setMono),
           ]),
           const SizedBox(height: AwvaSize.s2),
@@ -725,17 +771,29 @@ class _LatencyTable extends StatelessWidget {
 /// a bus as the output list names it
 String _bus(String bus) => switch (bus) { 'bluetooth' => 'Bluetooth', 'usb' => 'USB', _ => 'wired' };
 
-class _Segment extends StatelessWidget {
+class _Segment extends StatefulWidget {
   const _Segment({required this.label, required this.selected, required this.onTap, this.trailing});
   final String label;
   final bool selected;
   final VoidCallback onTap;
   final IconPainter? trailing;
   @override
+  State<_Segment> createState() => _SegmentState();
+}
+
+class _SegmentState extends State<_Segment> {
+  bool _hover = false;
+  @override
   Widget build(BuildContext context) {
     final c = AwvaTheme.of(context);
-    return MouseRegion(
+    final label = widget.label, selected = widget.selected, onTap = widget.onTap, trailing = widget.trailing;
+    return AwvaFocus(
+      label: label,
+      onPress: onTap,
+      child: MouseRegion(
       cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
       child: GestureDetector(
         onTap: onTap,
         child: AnimatedContainer(
@@ -743,15 +801,16 @@ class _Segment extends StatelessWidget {
           height: 30,
           padding: const EdgeInsets.symmetric(horizontal: 12),
           alignment: trailing == null ? Alignment.center : null,
-          decoration: BoxDecoration(color: selected ? c.bg3 : c.bg2, borderRadius: BorderRadius.circular(AwvaSize.radiusSmall)),
+          decoration: BoxDecoration(color: selected || _hover ? c.bg3 : c.bg2, borderRadius: BorderRadius.circular(AwvaSize.radiusSmall)),
           child: trailing == null
               ? Text(label, style: AwvaType.bodyStrong(selected ? c.text1 : c.text2))
               : Row(mainAxisSize: MainAxisSize.min, children: [
                   Flexible(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: AwvaType.bodyStrong(c.text1))),
                   const SizedBox(width: 4),
-                  AwvaIcon(trailing!, color: c.text3),
+                  AwvaIcon(trailing, color: c.text3),
                 ]),
         ),
+      ),
       ),
     );
   }

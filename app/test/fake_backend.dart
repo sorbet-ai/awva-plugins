@@ -48,6 +48,8 @@ class FakeBackend implements AwvaBackend {
     return _catalog.any((e) => e.key == key && e.ok);
   }
 
+  /// the sound's data, for a test to alter (long names)
+  Map<String, dynamic> get soundMap => _sound;
   @override
   Sound? sound() => Sound(_sound);
   @override
@@ -80,11 +82,13 @@ class FakeBackend implements AwvaBackend {
 
   @override
   Status status() => st;
+  /// the ports as the core lists them (a test unplugs one: the list changes under the UI)
+  List<MidiPortInfo> ports = [
+    MidiPortInfo({'name': 'MPE controller', 'enabled': true, 'state': 'open', 'message': ''}),
+    MidiPortInfo({'name': 'Keyboard', 'enabled': false, 'state': 'closed', 'message': ''}),
+  ];
   @override
-  List<MidiPortInfo> midiPorts() => [
-        MidiPortInfo({'name': 'MPE controller', 'enabled': true, 'state': 'open', 'message': ''}),
-        MidiPortInfo({'name': 'Keyboard', 'enabled': false, 'state': 'closed', 'message': ''}),
-      ];
+  List<MidiPortInfo> midiPorts() => ports;
   @override
   void midiRefresh() {}
   @override
